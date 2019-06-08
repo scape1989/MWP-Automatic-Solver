@@ -15,7 +15,7 @@ def bert_embedding_from_text(text):
     return bert_embedding(split_text)
 
 
-def main():
+if __name__ == "__main__":
     # Run a quick demo for understanding of the BERT encodings
     print("This is the BERT embeddings demo.")
 
@@ -30,7 +30,3 @@ It obtains new state-of-the-art results on eleven natural language processing ta
     result = bert_embedding_from_text(demo_text)
 
     print(result)
-
-
-if __name__ == "__main__":
-    main()
