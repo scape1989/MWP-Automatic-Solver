@@ -6,7 +6,7 @@ import json
 import pickle
 import re
 
-from .classes.EquationConverter import EquationConverter
+from classes.EquationConverter import EquationConverter
 
 
 # Datasets used as of now:
@@ -14,11 +14,17 @@ from .classes.EquationConverter import EquationConverter
 #   -> Dolphin18k (Only 1-var)
 #   -> MaWPS
 
+START_TOKEN = '<start>'
+
+END_TOKEN = '<end>'
 
 DIR_PATH = os.path.abspath(os.path.dirname(__file__))
 
 # Composite list of MWPs
 PROBLEM_LIST = []
+
+# The same list with all equations converted from infix to cleaned infix
+CLEAN_INFIX_CONVERTED_PROBLEM_LIST = []
 
 # The same list with all equations converted from infix to Polish notation
 POLISH_CONVERTED_PROBLEM_LIST = []
@@ -26,30 +32,51 @@ POLISH_CONVERTED_PROBLEM_LIST = []
 # The same list with all equations converted from infix to Reverse Polish notation
 REVERSE_POLISH_CONVERTED_PROBLEM_LIST = []
 
+DATA_STATS = os.path.join(
+    DIR_PATH, "../data/statistics.txt")
+
 
 def one_sentence_per_line_clean(text):
-    # Replace . at end of sentence with a .\n
-    text = re.sub(r"(?<!Mr|Mr|Dr|Ms)(?<!Mrs)\s+?\.\s+?", ".\n",
+    # Replace . with _._
+    text = re.sub(r"(?<!Mr|Mr|Dr|Ms)(?<!Mrs)(?<![0-9])(\s+)?\.(\s+)?", " . ",
                   text, flags=re.IGNORECASE)
 
-    # Replace _?,_?_,or ? with ?\n
-    text = re.sub(r"(\s+)?\?(\s+)?", "?\n",
+    # Replace ?
+    text = re.sub(r"(\s+)?\?(\s+)?", " ? ",
                   text, flags=re.IGNORECASE)
 
     # Erradicate sentences starting with a space
-    text = re.sub(r"^\s+", "",
-                  text)
+    text = re.sub(r"^\s+", "", text)
+
+    text = text.replace('\n', ' ')
+
+    text = text.replace('%', ' percent')
+
+    text = text.replace('$', ' $ ')
+
+    text = text.replace(r"\s+", ' ')
+
+    text = f"{START_TOKEN} {text} {END_TOKEN}"
+
+    text = re.sub(r"  ", " ", text)
 
     return text
 
 
-def filter_equation(text):
+def filter_dolphin_equation(text):
     # Remove unecessary characters in Dolphin18k data
     text = re.sub(r"(\r\n)?equ:\s+", ",",
                   text, flags=re.IGNORECASE)
 
     text = re.sub(r"unkn:(\s+)?\w+(\s+)?,", "",
                   text, flags=re.IGNORECASE)
+
+    # Conditions for problem
+    if len(text.split(',')) > 1  \
+            or not re.match(r"(^([A-Z]|[a-z])+(\s+)?\=.*|.*(\s+)?\=([A-Z]|[a-z])+$)", text) \
+            or re.match(r".*(!|\_).*", text) \
+            or len(text) == 0:
+        return False
 
     return text
 
@@ -83,8 +110,8 @@ def transform_AI2():
             question_text = one_sentence_per_line_clean(content[i].strip())
 
             problem = [("question", to_lower_case(question_text)),
-                       ("answer", content[i + 1].strip()),
-                       ("equation", to_lower_case(content[i + 2].strip()))]
+                       ("equation", to_lower_case(content[i + 2].strip())),
+                       ("answer", content[i + 1].strip())]
 
             problem_list.append(problem)
 
@@ -136,7 +163,10 @@ def transform_Dolphin18k():
                     elif key == "equations":
                         desired_key = "equation"
 
-                        value = filter_equation(value)
+                        value = filter_dolphin_equation(value)
+
+                        if value == False:
+                            has_all_data = False
                     elif key == "ans":
                         desired_key = "answer"
 
@@ -183,12 +213,20 @@ def transform_MaWPS():
                         desired_key = "question"
 
                         value = one_sentence_per_line_clean(value)
+
+                        problem.append((desired_key,
+                                        to_lower_case(value)))
                     elif key == "lEquations":
                         desired_key = "equation"
+
+                        # print(value)
+                        value = value[0]
+
+                        problem.append((desired_key,
+                                        to_lower_case(value)))
                     elif key == "lSolutions":
                         desired_key = "answer"
 
-                    if key == "lEquations" or key == "lSolutions":
                         problem.append((desired_key,
                                         to_lower_case(value[0])))
                     else:
@@ -230,7 +268,7 @@ def read_data_from_file(path):
 
 if __name__ == "__main__":
     print("Transforming all original datasets...")
-    print("NOTE: Find resulting data binaries in data/")
+    print("NOTE: Find resulting data binaries in the data folder.")
 
     # Filter unecessary data and change infix notation to prefix notation
     # Desired data will be found in the datasets_prefix folder once completed
@@ -239,9 +277,9 @@ if __name__ == "__main__":
     print(f"A total of {len(PROBLEM_LIST)} problems "
           + f"have been filtered from {len(total_filtered_datasets)} datasets.\n")
 
-    print("Saving cleaned data to data.p file...")
+    print("Saving cleaned data to original_data.pickle file...")
 
-    path = os.path.join(DIR_PATH, "../data/data.p")
+    path = os.path.join(DIR_PATH, "../data/original_data.pickle")
 
     # Save as binary
     with open(path, "wb") as fh:
@@ -249,17 +287,159 @@ if __name__ == "__main__":
 
     print("...done.")
 
-    # Run with option 1 to print the data after compilation
-    if len(sys.argv) > 1 and sys.argv[1] == "1":
-        read_data_from_file(path)
-
-    print("\nConverting found data to prefix notation...")
+    print("\n\nConverting found data to cleaned infix notation...")
 
     for problem in PROBLEM_LIST:
         problem_dict = dict(problem)
+
+        prefix = []
+
+        discard = False
+
         for key, value in problem_dict.items():
             if key == "equation":
                 convert = EquationConverter()
-                print(value)
                 convert.eqset(value)
-                convert.show_expression_tree()
+                prefix_value = convert.expr_as_infix()
+                if re.match(r"[a-z] = .*\d+.*", prefix_value):
+                    prefix.append((key, prefix_value))
+                else:
+                    discard = True
+            else:
+                prefix.append((key, value))
+
+        if not discard:
+            CLEAN_INFIX_CONVERTED_PROBLEM_LIST.append(prefix)
+
+    print(f"A total of {len(CLEAN_INFIX_CONVERTED_PROBLEM_LIST)} infix "
+          + "problems have been filtered.")
+
+    print("\nSaving cleaned prefix data to infix_data.pickle file...")
+
+    path = os.path.join(DIR_PATH, "../data/infix_data.pickle")
+
+    # Save as binary
+    with open(path, "wb") as fh:
+        pickle.dump(CLEAN_INFIX_CONVERTED_PROBLEM_LIST, fh)
+
+    print("...done.")
+
+    print("\n\nConverting found data to prefix notation...")
+
+    for problem in PROBLEM_LIST:
+        problem_dict = dict(problem)
+
+        prefix = []
+
+        discard = False
+
+        for key, value in problem_dict.items():
+            if key == "equation":
+                convert = EquationConverter()
+                convert.eqset(value)
+                prefix_value = convert.expr_as_prefix()
+                if re.match(r"[a-z] = .*\d+.*", prefix_value):
+                    prefix.append((key, prefix_value))
+                else:
+                    discard = True
+            else:
+                prefix.append((key, value))
+
+        if not discard:
+            POLISH_CONVERTED_PROBLEM_LIST.append(prefix)
+
+    print(f"A total of {len(POLISH_CONVERTED_PROBLEM_LIST)} prefix "
+          + "problems have been filtered.")
+
+    print("\nSaving cleaned prefix data to prefix_data.pickle file...")
+
+    path = os.path.join(DIR_PATH, "../data/prefix_data.pickle")
+
+    # Save as binary
+    with open(path, "wb") as fh:
+        pickle.dump(POLISH_CONVERTED_PROBLEM_LIST, fh)
+
+    print("...done.")
+
+    print("\n\nConverting found data to postfix notation...")
+
+    for problem in PROBLEM_LIST:
+        problem_dict = dict(problem)
+
+        postfix = []
+
+        discard = False
+
+        for key, value in problem_dict.items():
+            if key == "equation":
+                convert = EquationConverter()
+                convert.eqset(value)
+                postfix_value = convert.expr_as_postfix()
+                if re.match(r"[a-z] = .*\d+.*", postfix_value):
+                    postfix.append((key, postfix_value))
+                else:
+                    discard = True
+            else:
+                postfix.append((key, value))
+
+        if not discard:
+            REVERSE_POLISH_CONVERTED_PROBLEM_LIST.append(postfix)
+
+    print(f"A total of {len(REVERSE_POLISH_CONVERTED_PROBLEM_LIST)} postfix "
+          + "problems have been filtered.")
+
+    print("\nSaving cleaned postfix data to postfix_data.pickle file...")
+
+    path = os.path.join(DIR_PATH, "../data/postfix_data.pickle")
+
+    # Save as binary
+    with open(path, "wb") as fh:
+        pickle.dump(REVERSE_POLISH_CONVERTED_PROBLEM_LIST, fh)
+
+    print("...done.")
+
+    print("\nSaving all cleaned data to large_data.pickle file...")
+
+    path = os.path.join(DIR_PATH, "../data/large_data.pickle")
+
+    # Combine all representations
+    total_data = []
+
+    for p in PROBLEM_LIST:
+        total_data.append(p)
+
+    for p in CLEAN_INFIX_CONVERTED_PROBLEM_LIST:
+        total_data.append(p)
+
+    for p in POLISH_CONVERTED_PROBLEM_LIST:
+        total_data.append(p)
+
+    for p in REVERSE_POLISH_CONVERTED_PROBLEM_LIST:
+        total_data.append(p)
+
+    # Save as binary
+    with open(path, "wb") as fh:
+        pickle.dump(total_data, fh)
+
+    print("...done.")
+
+    if os.path.isfile(DATA_STATS):
+        os.remove(DATA_STATS)
+
+    with open(DATA_STATS, "w") as fh:
+        fh.write("Data file information. "
+                 + "All of the binaries are described below.\n\n")
+        fh.write("Original Data: ")
+        fh.write("%d problems\n" % len(PROBLEM_LIST))
+        fh.write("Clean Infix Data: ")
+        fh.write("%d problems\n" % len(CLEAN_INFIX_CONVERTED_PROBLEM_LIST))
+        fh.write("Prefix Data: ")
+        fh.write("%d problems\n" % len(POLISH_CONVERTED_PROBLEM_LIST))
+        fh.write("Postfix Data: ")
+        fh.write("%d problems\n" % len(REVERSE_POLISH_CONVERTED_PROBLEM_LIST))
+        fh.write("Large Data: ")
+        fh.write("%d problems\n" % len(total_data))
+
+    # path = os.path.join(DIR_PATH, "../data/infix_data.pickle")
+
+    # read_data_from_file(path)

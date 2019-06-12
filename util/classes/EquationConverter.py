@@ -1,15 +1,16 @@
 from __future__ import absolute_import
 
 import re
+import sympy
 from .ExpressionTree import ExpressionTree
 from .Stack import Stack
 
-OPERATORS = set(['+', '-', '*', '/', '(', ')'])
-PRIORITY = {'+': 2, '-': 2, '*': 3, '/': 3}
+OPERATORS = set(['+', '-', '*', '/', '(', ')', '^'])
+PRIORITY = {'+': 2, '-': 2, '*': 3, '/': 3, '^': 4}
 
 
 class EquationConverter():
-    def __init__(self, equation=""):
+    def __init__(self, equation="DEFAULT"):
         self.original_equation = equation
         self.tree = ExpressionTree()
         self.equals_what = None
@@ -35,7 +36,15 @@ class EquationConverter():
 
         return f"{self.equals_what} = {infix_expression}"
 
-    def eqset(self, equation=""):
+    def solved(self, equation):
+        sympy_eq = sympy.sympify("Eq(" + equation.replace("=", ",") + ")")
+
+        solved_equation = [sympy.solve(sympy_eq, sym, dict=True)
+                           for sym in sympy_eq.free_symbols]
+
+        return solved_equation
+
+    def eqset(self, equation="DEFAULT"):
         self.original_equation = equation
 
         self.postfix_expression = self.__get_postfix_from_infix()
@@ -54,7 +63,8 @@ class EquationConverter():
         stack = Stack()
         output = ""
 
-        split_expression = re.findall(r"(\d+|[^ 0-9])", filtered_expression)
+        split_expression = re.findall(r"(\d*\.?\d+|[^0-9])",
+                                      filtered_expression)
 
         for char in split_expression:
             if char not in OPERATORS:
@@ -65,7 +75,7 @@ class EquationConverter():
                 while not stack.isEmpty() and stack.peek() != '(':
                     output += ' '
                     output += stack.pop()
-                stack.pop()  # pop '('
+                stack.pop()
             else:
                 output += ' '
 
@@ -98,11 +108,14 @@ class EquationConverter():
         equation = re.sub(r"([a-z]+(\s+)?=|=(\s+)?[a-z]+)",
                           "", equation)
 
-        return equation, equation_equals
+        return equation.replace(' ', ""), equation_equals.replace(' ', "")
 
     def __fill_tree(self):
         # Start with the reversed postfix expression
-        self.tree.tree_from_postfix(self.postfix_expression)
+        try:
+            self.tree.tree_from_postfix(self.postfix_expression)
+        except:
+            pass
 
 
 if __name__ == "__main__":

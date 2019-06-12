@@ -1,5 +1,5 @@
 from __future__ import absolute_import
-
+import re
 from .Node import Node
 from .Stack import Stack
 
@@ -36,7 +36,13 @@ class ExpressionTree():
         return 0
 
     def tree_from_postfix(self, postfix_expression):
-        elements = postfix_expression.split(' ')
+        postfix_expression_array = re.findall(r"(\d*\.?\d+|[^0-9])",
+                                              postfix_expression)
+
+        elements = []
+        for element in postfix_expression_array:
+            if not re.match('\s+', element):
+                elements.append(element)
 
         stack = Stack()
 
@@ -52,6 +58,9 @@ class ExpressionTree():
                 stack.push(Node(element))
 
         self.root = stack.pop()
+
+    def has_tree(self):
+        return not self.root is None
 
     def inorder(self, node="DEFAULT"):
         # Returns the tree values in inorder
@@ -146,7 +155,7 @@ class ExpressionTree():
         self.__ordered_data = []
 
     def __is_operator(self, value):
-        return value is '+' or value is '-' or value is '/' or value is '*'
+        return value is '+' or value is '-' or value is '/' or value is '*' or value is '^'
 
     def __get_operator_precendence(self, operator):
         if operator is '^':
@@ -155,6 +164,7 @@ class ExpressionTree():
             return 3
         elif operator is '-' or operator is '+':
             return 2
+        return 0
 
     def __get_tree(self):
         # Return the stored order of data ie. postorder

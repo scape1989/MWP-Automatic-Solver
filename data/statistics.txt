@@ -1,0 +1,7 @@
+Data file information. All of the binaries are described below.
+
+Original Data: 3688 problems
+Clean Infix Data: 3319 problems
+Prefix Data: 3319 problems
+Postfix Data: 3319 problems
+Large Data: 13645 problems
