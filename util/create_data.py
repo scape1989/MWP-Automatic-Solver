@@ -32,8 +32,8 @@ POLISH_CONVERTED_PROBLEM_LIST = []
 # The same list with all equations converted from infix to Reverse Polish notation
 REVERSE_POLISH_CONVERTED_PROBLEM_LIST = []
 
-DATA_STATS = os.path.join(
-    DIR_PATH, "../data/statistics.txt")
+DATA_STATS = os.path.join(DIR_PATH,
+                          "../data/statistics.txt")
 
 
 def one_sentence_per_line_clean(text):
@@ -56,7 +56,7 @@ def one_sentence_per_line_clean(text):
 
     text = text.replace(r"\s+", ' ')
 
-    text = f"{START_TOKEN} {text} {END_TOKEN}"
+    # text = f"{START_TOKEN} {text} {END_TOKEN}"
 
     text = re.sub(r"  ", " ", text)
 
@@ -95,7 +95,7 @@ def transform_AI2():
     print("\nWorking on AI2 data...")
 
     # Get relative path to file
-    path = os.path.join(DIR_PATH, "../datasets/AI2/AI2.txt")
+    path = os.path.join(DIR_PATH, "../data/datasets/AI2/AI2.txt")
 
     problem_list = []
 
@@ -136,7 +136,8 @@ def transform_AI2():
 def transform_Dolphin18k():
     print("\nWorking on Dolphin18k data...")
 
-    path = os.path.join(DIR_PATH, "../datasets/Dolphin18k/Dolphin18k.json")
+    path = os.path.join(
+        DIR_PATH, "../data/datasets/Dolphin18k/Dolphin18k.json")
 
     problem_list = []
 
@@ -189,7 +190,7 @@ def transform_Dolphin18k():
 def transform_MaWPS():
     print("\nWorking on MaWPS data...")
 
-    path = os.path.join(DIR_PATH, "../datasets/MaWPS/MaWPS.json")
+    path = os.path.join(DIR_PATH, "../data/datasets/MaWPS/MaWPS.json")
 
     problem_list = []
 

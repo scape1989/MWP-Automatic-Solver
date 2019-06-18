@@ -1,4 +1,5 @@
 from __future__ import absolute_import
+
 import re
 from .Node import Node
 from .Stack import Stack
