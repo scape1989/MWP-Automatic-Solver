@@ -4,7 +4,6 @@ from keras_transformer import get_model, decode
 from keras import callbacks, metrics, optimizers
 from keras import backend as K
 from bert_embedding import BertEmbedding
-from models.transformer.CustomSchedule import CustomSchedule
 import numpy as np
 import os
 import pickle
@@ -17,7 +16,7 @@ bert_embedding = BertEmbedding(model='bert_24_1024_16',
 
 
 DIR_PATH = DIR_PATH = os.path.abspath(os.path.dirname(__file__))
-DATASET = 'data/small_data.pickle'
+DATASET = 'data/prefix_data.pickle'
 DATA_PATH = os.path.join(DIR_PATH, DATASET)
 
 # Data constraints
@@ -34,13 +33,14 @@ DFF = 256
 DROPOUT = 0.05
 
 EPOCHS = 20
-BATCH_SIZE = 32
+BATCH_SIZE = 16
 SHUFFLE = True
 
 # Adam params
-BETA_1 = 0.9
-BETA_2 = 0.98
+BETA_1 = 0.98
+BETA_2 = 0.99
 EPSILON = 1e-9
+LEARNING = 0.001
 
 # Random seed for consistency
 SEED = 1234
@@ -80,25 +80,6 @@ def expressionize(what):
     return re.sub(r"([a-z] \=|\= [a-z])", "", what)
 
 
-def build_token_dict(token_list):
-    token_dict = {
-        '<PAD>': [np.array([0])],
-        '<START>': [np.array([1])],
-        '<END>': [np.array([2])],
-    }
-
-    for tokens in token_list:
-        for token in tokens:
-            word = ''.join(token[0])
-            embeddings = token[1]
-
-            if word not in token_dict:
-                # Assign a lookup to an np array representation
-                token_dict[word] = embeddings
-
-    return token_dict
-
-
 def f1(y_true, y_pred):
     def recall(y_true, y_pred):
         true_positives = K.sum(K.round(K.clip(y_true * y_pred, 0, 1)))
@@ -118,16 +99,6 @@ def f1(y_true, y_pred):
     return 2 * ((precision * recall) / (precision + recall + K.epsilon()))
 
 
-class F1():
-    def __init__(self, test_data):
-        self.test_data = test_data
-
-    def on_epoch_end(self, epoch, logs={}):
-        x, y = self.test_data
-        loss, acc = self.model.evaluate(x, y, verbose=0)
-        print('\nTesting loss: {}, acc: {}\n'.format(loss, acc))
-
-
 log(DATASET)
 log(f"\nEpochs: {EPOCHS}")
 log(f"Equals Sign: {EQUALS_SIGN}")
@@ -143,7 +114,6 @@ source_tokens = []
 target_tokens = []
 
 test_tokens = []
-ttest_tokens = []
 
 # Generate dictionaries
 examples = read_data_from_file(DATA_PATH)
@@ -157,70 +127,129 @@ log(f"{len(examples) - train_size}/{train_size + (len(examples) - train_size)} p
 
 print("Tokenizing data...")
 
-for example in examples[:1]:
+
+def reduced_representation(embedding):
+    # Due to memory constraints, use only the first element in each
+    #  representation array given by BERT
+    # ! Using the full array does work if you have the capacity
+    small_em = []
+
+    for token in embedding:
+        try:
+            tok = "".join(token[0])
+            rep = token[1][0].item(0)
+            pair = (tok, rep)
+            small_em.append(pair)
+        except:
+            pass
+    return small_em
+
+
+def build_token_dict(problem_list):
+    token_dict = {
+        '<PAD>': 0,
+        '<START>': 1,
+        '<END>': 2,
+    }
+
+    for problem in problem_list:
+        for tokens in problem:
+            word = tokens[0]
+            embedding = tokens[1]
+
+            if word not in token_dict:
+                # Assign a lookup to a piece of the BERT representation
+                token_dict[word] = embedding
+
+    return token_dict
+
+
+problem_number = 1
+for example in examples[:train_size]:
+    progress = int(problem_number / len(examples) * 100)
+    print('Progress: [%d%%]\r' % progress, end="")
     try:
         problem = get_as_tuple(example)
         text = problem[0]
         equation = problem[1]
         # The text
         mwp = text.split(' ')
-        mwp = bert_embedding(mwp)
+        mwp = reduced_representation(bert_embedding(mwp))
         source_tokens.append(mwp)
         # The equation translation
         if not EQUALS_SIGN:
             e = expressionize(equation).split(' ')
-            e = bert_embedding(e)
+            e = reduced_representation(bert_embedding(e))
             target_tokens.append(e)
         else:
             e = equation.split(' ')
-            e = bert_embedding(e)
+            e = reduced_representation(bert_embedding(e))
             target_tokens.append(e)
     except:
         pass
+    problem_number += 1
+
+for example in examples[train_size:]:
+    progress = int(problem_number / len(examples) * 100)
+    print('Progress: [%d%%]\r' % progress, end="")
+    # Encode only the questions for testing the translation
+    try:
+        text = get_as_tuple(example)[0]
+        # The text
+        mwp = text.split(' ')
+        test_tokens.append(mwp)
+    except:
+        pass
+    problem_number += 1
+
+print("...done.")
+
+print("Building lookup table from vocabulary...")
 
 # Token to np arrays
+# The question text dictionary
 source_token_dict = build_token_dict(source_tokens)
+# The equation dictionary
 target_token_dict = build_token_dict(target_tokens)
-
 
 print("...done.")
 
 
-def get_bert_encoded_input(tokens, output_embedding=False):
+def get_bert_encoded_input(problems, output_embedding=False):
     encoded_tokens = []
 
-    for problem_words in tokens:
-        if not output_embedding:
-            problem = [source_token_dict["<START>"][0]]
+    for problem in problems:
+        if output_embedding == False:
+            p = [source_token_dict["<START>"]]
         else:
-            problem = []
+            p = []
 
-        for tokens in problem_words:
-            representations = tokens[1]
-            if len(representations) > 0:
-                for nparray in representations:
-                    problem.append(nparray)
+        for token in problem:
+            # (token, value)
+            # Append only the representation of the word
+            if output_embedding == False:
+                p.append(token[1])
+            else:
+                p.append([token[1]])
 
-        problem.append(source_token_dict["<END>"][0])
         if output_embedding:
-            problem.append(source_token_dict["<PAD>"][0])
+            p.append([source_token_dict["<END>"]])
+            p.append([source_token_dict["<PAD>"]])
+        else:
+            p.append(source_token_dict["<END>"])
 
-        encoded_tokens.append(problem)
+        encoded_tokens.append(p)
 
     return encoded_tokens
 
 
-print("Building BERT vocab lookup table...")
+print("Building reverse lookup table...")
 
 # Problem vocab lookup table
 target_token_dict_inv = {}
 for k, v in target_token_dict.items():
     # Value is array of np arrays
-    for array in v:
-        key = str(array)
-        key = re.sub('\n', '', key)
-        target_token_dict_inv[f'{key}'] = k
-
+    target_token_dict_inv[f'{v}'] = k
 
 encoded_input = get_bert_encoded_input(source_tokens)
 decoded_input = get_bert_encoded_input(target_tokens)
@@ -236,13 +265,13 @@ target_max_len = max(map(len, decoded_input))
 print("Padding the embedded problem text...")
 
 # Padding for each encoding
-encoded_input = [tokens + [source_token_dict["<PAD>"][0]] *
+encoded_input = [tokens + [source_token_dict["<PAD>"]] *
                  (source_max_len - len(tokens)) for tokens in encoded_input]
-decoded_input = [tokens + [source_token_dict["<PAD>"][0]] *
+decoded_input = [tokens + [source_token_dict["<PAD>"]] *
                  (target_max_len - len(tokens)) for tokens in decoded_input]
 
 print("Padding the embedded expressions...")
-output_embedding = [tokens + [source_token_dict["<PAD>"][0]] *
+output_embedding = [tokens + [[source_token_dict["<PAD>"]]] *
                     (target_max_len - len(tokens)) for tokens in output_embedding]
 
 print("...Done.")
@@ -260,16 +289,14 @@ model = get_model(
     use_same_embed=True,  # Use different embeddings for different languages
 )
 
-optimizer = optimizers.Adam(lr=0.001,
+optimizer = optimizers.Adam(lr=LEARNING,
                             beta_1=BETA_1,
                             beta_2=BETA_2,
-                            epsilon=EPSILON,
-                            decay=0.9999)
+                            epsilon=EPSILON)
 
 model.compile(optimizer=optimizer,
               loss='sparse_categorical_crossentropy',
-              metrics=[f1]
-              )
+              metrics=[f1])
 
 print("...Done.")
 
@@ -277,7 +304,9 @@ model.summary()
 
 # Input shapes
 X = [np.array(encoded_input * 1024), np.array(decoded_input * 1024)]
-y = [np.array(output_embedding * 1024), None]
+y = np.array(output_embedding * 1024)
+
+print(X[0].shape, X[1].shape, y.shape)
 
 print("Training...")
 
@@ -297,8 +326,7 @@ model.fit(x=X,
                                                  patience=5,
                                                  min_lr=0.001),
                      callbacks.CSVLogger(LOG_FILE,
-                                         append=True),
-                     F1((X, y))]
+                                         append=True), ]
           )
 
 print("...Done.")
@@ -307,10 +335,12 @@ model.save(MODEL_FILE)
 
 print("Model saved.")
 
+print(test_input)
+
 # Predict with Beam Search
 decoded = decode(
     model,
-    encoded_input,
+    test_input,
     start_token=target_token_dict['<START>'],
     end_token=target_token_dict['<END>'],
     pad_token=target_token_dict['<PAD>'],
@@ -318,8 +348,11 @@ decoded = decode(
     temperature=1.0,
 )
 
+print(decoded)
+exit()
+
 # Make predictions
-for i in range(10):
+for i in range(len(test_tokens) - 1):
     prediction = ''.join(
         map(lambda x: target_token_dict_inv[x], decoded[i][1:-1]))
     print(prediction)

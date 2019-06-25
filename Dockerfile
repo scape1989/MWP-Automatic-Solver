@@ -13,5 +13,3 @@ RUN pip3 install bert-embedding
 RUN pip3 install tensorflow-gpu
 RUN pip3 install tensorflow-datasets
 RUN pip3 install keras-transformer
-RUN pip3 install Keras
-RUN pip3 install numpy
