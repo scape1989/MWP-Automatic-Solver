@@ -35,6 +35,23 @@ To mount a volume after building do:
 nvidia-docker build -t containername .
 nvidia-docker run --rm -v ${PWD}:/mwp -it --runtime=nvidia containername bash
 ```
+Or to limit available GPUs in the container
+```
+nvidia-docker run --rm -v ${PWD}:/mwp -it --runtime=nvidia -e NVIDIA_VISIBLE_DEVICES=0 containername bash
+```
 Then your checkpoint should be saved to the host machine.
 
 I'm working to get the MWP data into the correct format for translation. For now this is just a straight up rip off of [Google's Colab](https://www.tensorflow.org/beta/tutorials/text/transformer). Gotta start somewhere...
+
+Useful commands I always forget
+```
+nvidia-smi
+watch -n 0.5 nvidia-smi
+```
+Shows available GPUs
+```
+tmux new -s sessionname
+tmux a sessionname
+```
+
+sklearn auc

@@ -1,0 +1,11 @@
+data/small_data.pickle
+
+Epochs: 20
+Equals Sign: False
+Heads: 8
+Encoders: 2
+Decoders: 2
+Batch Size: 32
+Feed Forward Depth: 256
+Dropout: 0.05
+Shuffle: True

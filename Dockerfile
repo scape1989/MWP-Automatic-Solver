@@ -1,22 +1,17 @@
-# Using the latest TensorFlow beta available at the time and python version 3
-# (GPU compatible)
-FROM tensorflow/tensorflow:2.0.0b1-gpu-py3
+FROM tensorflow/tensorflow:nightly-gpu
+WORKDIR /home/mwp
+ADD . /home/mwp
 
-# Find this directory copied to the container in ~/mwp folder
-ADD . mwp/
+RUN chmod -R 777 /home/mwp
+RUN mkdir /.mxnet
+RUN chmod -R 777 /.mxnet
 
-# Might add BERT later
-# RUN pip install bert-tensorflow
-# RUN pip install bert-embedding
+RUN apt-get install -y python3-pip
+RUN apt-get install -y python3.7
 
-# For the translation example's data
-RUN pip install tensorflow-datasets
-
-# Install the python dependencies we're using
-RUN pip install pandas
-RUN pip install numpy
-RUN pip install sklearn
-
-# For equation evaluation
-# RUN pip install sympy
-
+RUN pip3 install bert-embedding
+RUN pip3 install tensorflow-gpu
+RUN pip3 install tensorflow-datasets
+RUN pip3 install keras-transformer
+RUN pip3 install Keras
+RUN pip3 install numpy

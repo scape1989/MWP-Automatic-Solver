@@ -35,6 +35,9 @@ REVERSE_POLISH_CONVERTED_PROBLEM_LIST = []
 DATA_STATS = os.path.join(DIR_PATH,
                           "../data/statistics.txt")
 
+WITHOUT_EQUALS = True
+WITHOUT_ANSWER = True
+
 
 def one_sentence_per_line_clean(text):
     # Replace . with _._
@@ -172,6 +175,7 @@ def transform_Dolphin18k():
                         desired_key = "answer"
 
                     problem.append((desired_key, to_lower_case(value)))
+
         if has_all_data == True:
             problem_list.append(problem)
 
@@ -249,12 +253,38 @@ def transform_MaWPS():
     return "MaWPS"
 
 
+def transform_custom():
+    print("\nWorking on self-generated data...")
+
+    path = os.path.join(DIR_PATH, "../data/generated/generated_data_v1.pickle")
+
+    problem_list = []
+
+    with open(path, "rb") as fh:
+        file_data = pickle.load(fh)
+
+        for problem in file_data:
+            problem_list.append(problem)
+
+            # Add the problem to the global list
+            PROBLEM_LIST.append(problem)
+
+    # print(problem_list)
+
+    print(f"-> Retrieved {len(problem_list)} / {len(file_data)} problems.")
+
+    print("...done.\n")
+
+    return "Custom"
+
+
 def transform_all_datasets():
     total_datasets = []
     # Iteratively rework the data
     total_datasets.append(transform_AI2())
     total_datasets.append(transform_Dolphin18k())
     total_datasets.append(transform_MaWPS())
+    total_datasets.append(transform_custom())
 
     return total_datasets
 
@@ -293,7 +323,7 @@ if __name__ == "__main__":
     for problem in PROBLEM_LIST:
         problem_dict = dict(problem)
 
-        prefix = []
+        infix = []
 
         discard = False
 
@@ -301,16 +331,16 @@ if __name__ == "__main__":
             if key == "equation":
                 convert = EquationConverter()
                 convert.eqset(value)
-                prefix_value = convert.expr_as_infix()
-                if re.match(r"[a-z] = .*\d+.*", prefix_value):
-                    prefix.append((key, prefix_value))
+                infix_value = convert.expr_as_infix()
+                if re.match(r"[a-z] = .*\d+.*", infix_value):
+                    infix.append((key, infix_value))
                 else:
                     discard = True
             else:
-                prefix.append((key, value))
+                infix.append((key, value))
 
         if not discard:
-            CLEAN_INFIX_CONVERTED_PROBLEM_LIST.append(prefix)
+            CLEAN_INFIX_CONVERTED_PROBLEM_LIST.append(infix)
 
     print(f"A total of {len(CLEAN_INFIX_CONVERTED_PROBLEM_LIST)} infix "
           + "problems have been filtered.")
@@ -424,6 +454,22 @@ if __name__ == "__main__":
 
     print("...done.")
 
+    print("\nCreating a small test file...")
+
+    path = os.path.join(DIR_PATH, "../data/small_data.pickle")
+
+    # Combine all representations
+    small_data = []
+
+    for p in total_data[:100]:
+        small_data.append(p)
+
+    # Save as binary
+    with open(path, "wb") as fh:
+        pickle.dump(small_data, fh)
+
+    print("...done.")
+
     if os.path.isfile(DATA_STATS):
         os.remove(DATA_STATS)
 
@@ -440,6 +486,8 @@ if __name__ == "__main__":
         fh.write("%d problems\n" % len(REVERSE_POLISH_CONVERTED_PROBLEM_LIST))
         fh.write("Large Data: ")
         fh.write("%d problems\n" % len(total_data))
+        fh.write("Small Data: ")
+        fh.write("%d problems\n" % len(small_data))
 
     # path = os.path.join(DIR_PATH, "../data/infix_data.pickle")
 
