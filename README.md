@@ -48,14 +48,11 @@ nvidia-docker run -u $(id -u):$(id -g) -v $(PWD):home/mwp -it --runtime=nvidia -
 ```
 Then your checkpoints, tensorboard data, etc, should be saved to the host machine.
 
-I'm working to get the MWP data into the correct format for translation. For now this is just a straight up rip off of [Google's Colab](https://www.tensorflow.org/beta/tutorials/text/transformer). Gotta start somewhere...
-
 Useful commands I always forget
 ```
 watch -n 0.5 nvidia-smi
 ```
 
-Shows available GPUs
 ```
 tmux new -s sessionname
 tmux a -t sessionname

@@ -1,8 +1,8 @@
 Data file information. All of the binaries are described below.
 
-Original Data: 503688 problems
-Clean Infix Data: 497907 problems
-Prefix Data: 497907 problems
-Postfix Data: 497907 problems
-Large Data: 1997409 problems
+Original Data: 3688 problems
+Clean Infix Data: 3319 problems
+Prefix Data: 3319 problems
+Postfix Data: 3319 problems
+Large Data: 13645 problems
 Small Data: 100 problems

@@ -284,7 +284,7 @@ def transform_all_datasets():
     total_datasets.append(transform_AI2())
     total_datasets.append(transform_Dolphin18k())
     total_datasets.append(transform_MaWPS())
-    total_datasets.append(transform_custom())
+    # total_datasets.append(transform_custom())
 
     return total_datasets
 

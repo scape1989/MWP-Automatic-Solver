@@ -54,6 +54,7 @@ decode_input = [list(map(lambda x: target_token_dict[x], tokens))
 decode_output = [list(map(lambda x: [target_token_dict[x]], tokens))
                  for tokens in output_tokens]
 
+print(decode_output)
 # Build & fit model
 model = get_model(
     token_num=max(len(source_token_dict), len(target_token_dict)),
