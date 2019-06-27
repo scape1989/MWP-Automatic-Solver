@@ -32,6 +32,11 @@ POLISH_CONVERTED_PROBLEM_LIST = []
 # The same list with all equations converted from infix to Reverse Polish notation
 REVERSE_POLISH_CONVERTED_PROBLEM_LIST = []
 
+DOLPHIN = []
+MAWPS = []
+AI2 = []
+GENERATED = []
+
 DATA_STATS = os.path.join(DIR_PATH,
                           "../data/statistics.txt")
 
@@ -94,6 +99,12 @@ def to_lower_case(text):
     return text
 
 
+def binary(relative_path, list):
+    # Save as binary
+    with open(os.path.join(DIR_PATH, relative_path), "wb") as fh:
+        pickle.dump(list, fh)
+
+
 def transform_AI2():
     print("\nWorking on AI2 data...")
 
@@ -117,6 +128,7 @@ def transform_AI2():
                        ("answer", content[i + 1].strip())]
 
             problem_list.append(problem)
+            AI2.append(problem)
 
             # Add the problem to the global list
             PROBLEM_LIST.append(problem)
@@ -178,6 +190,7 @@ def transform_Dolphin18k():
 
         if has_all_data == True:
             problem_list.append(problem)
+            DOLPHIN.append(problem)
 
             # Add the problem to the global list
             PROBLEM_LIST.append(problem)
@@ -240,6 +253,7 @@ def transform_MaWPS():
 
         if has_all_data == True:
             problem_list.append(problem)
+            MAWPS.append(problem)
 
             # Add the problem to the global list
             PROBLEM_LIST.append(problem)
@@ -265,11 +279,14 @@ def transform_custom():
 
         for problem in file_data:
             problem_list.append(problem)
+            GENERATED.append(problem)
 
             # Add the problem to the global list
             PROBLEM_LIST.append(problem)
 
     # print(problem_list)
+
+    binary(os.path.join(DIR_PATH, "../data/gen1.pickle"), problem_list)
 
     print(f"-> Retrieved {len(problem_list)} / {len(file_data)} problems.")
 
@@ -284,7 +301,7 @@ def transform_all_datasets():
     total_datasets.append(transform_AI2())
     total_datasets.append(transform_Dolphin18k())
     total_datasets.append(transform_MaWPS())
-    # total_datasets.append(transform_custom())
+    total_datasets.append(transform_custom())
 
     return total_datasets
 
@@ -310,11 +327,7 @@ if __name__ == "__main__":
 
     print("Saving cleaned data to original_data.pickle file...")
 
-    path = os.path.join(DIR_PATH, "../data/original_data.pickle")
-
-    # Save as binary
-    with open(path, "wb") as fh:
-        pickle.dump(PROBLEM_LIST, fh)
+    binary("../data/original_data.pickle", PROBLEM_LIST)
 
     print("...done.")
 
@@ -347,11 +360,7 @@ if __name__ == "__main__":
 
     print("\nSaving cleaned prefix data to infix_data.pickle file...")
 
-    path = os.path.join(DIR_PATH, "../data/infix_data.pickle")
-
-    # Save as binary
-    with open(path, "wb") as fh:
-        pickle.dump(CLEAN_INFIX_CONVERTED_PROBLEM_LIST, fh)
+    binary("../data/infix_data.pickle", CLEAN_INFIX_CONVERTED_PROBLEM_LIST)
 
     print("...done.")
 
@@ -384,11 +393,7 @@ if __name__ == "__main__":
 
     print("\nSaving cleaned prefix data to prefix_data.pickle file...")
 
-    path = os.path.join(DIR_PATH, "../data/prefix_data.pickle")
-
-    # Save as binary
-    with open(path, "wb") as fh:
-        pickle.dump(POLISH_CONVERTED_PROBLEM_LIST, fh)
+    binary("../data/prefix_data.pickle", POLISH_CONVERTED_PROBLEM_LIST)
 
     print("...done.")
 
@@ -421,17 +426,12 @@ if __name__ == "__main__":
 
     print("\nSaving cleaned postfix data to postfix_data.pickle file...")
 
-    path = os.path.join(DIR_PATH, "../data/postfix_data.pickle")
-
-    # Save as binary
-    with open(path, "wb") as fh:
-        pickle.dump(REVERSE_POLISH_CONVERTED_PROBLEM_LIST, fh)
+    binary("../data/postfix_data.pickle",
+           REVERSE_POLISH_CONVERTED_PROBLEM_LIST)
 
     print("...done.")
 
     print("\nSaving all cleaned data to large_data.pickle file...")
-
-    path = os.path.join(DIR_PATH, "../data/large_data.pickle")
 
     # Combine all representations
     total_data = []
@@ -448,15 +448,11 @@ if __name__ == "__main__":
     for p in REVERSE_POLISH_CONVERTED_PROBLEM_LIST:
         total_data.append(p)
 
-    # Save as binary
-    with open(path, "wb") as fh:
-        pickle.dump(total_data, fh)
+    binary("../data/large_data.pickle", total_data)
 
     print("...done.")
 
     print("\nCreating a small test file...")
-
-    path = os.path.join(DIR_PATH, "../data/small_data.pickle")
 
     # Combine all representations
     small_data = []
@@ -464,9 +460,16 @@ if __name__ == "__main__":
     for p in total_data[:100]:
         small_data.append(p)
 
-    # Save as binary
-    with open(path, "wb") as fh:
-        pickle.dump(small_data, fh)
+    binary("../data/small_data.pickle", small_data)
+
+    # The direct problems from Dolphin18k
+    binary("../data/dolphin.pickle", DOLPHIN)
+    # The direct problems from MaWPS
+    binary("../data/mawps.pickle", MAWPS)
+    # The direct problems from AI2
+    binary("../data/ai2.pickle", AI2)
+    # The generated data
+    binary("../data/generated.pickle", GENERATED)
 
     print("...done.")
 
@@ -484,11 +487,17 @@ if __name__ == "__main__":
         fh.write("%d problems\n" % len(POLISH_CONVERTED_PROBLEM_LIST))
         fh.write("Postfix Data: ")
         fh.write("%d problems\n" % len(REVERSE_POLISH_CONVERTED_PROBLEM_LIST))
+        fh.write("Dolphin: ")
+        fh.write("%d problems\n" % len(DOLPHIN))
+        fh.write("AI2: ")
+        fh.write("%d problems\n" % len(AI2))
+        fh.write("MaWPS: ")
+        fh.write("%d problems\n" % len(MAWPS))
+        fh.write("Generated MWPs (gen1): ")
+        fh.write("%d problems\n" % len(GENERATED))
         fh.write("Large Data: ")
         fh.write("%d problems\n" % len(total_data))
         fh.write("Small Data: ")
         fh.write("%d problems\n" % len(small_data))
 
-    # path = os.path.join(DIR_PATH, "../data/infix_data.pickle")
-
-    # read_data_from_file(path)
+    # read_data_from_file(os.path.join(DIR_PATH, "../data/infix_data.pickle"))

@@ -3,9 +3,7 @@ from __future__ import absolute_import
 from keras_transformer import get_model, decode
 from keras import callbacks, metrics, optimizers
 from keras import backend as K
-from gensim.models import Word2Vec
-from gensim.models.phrases import Phrases, Phraser
-import pandas as pd
+from bert_embedding import BertEmbedding
 import numpy as np
 import os
 import pickle
@@ -13,9 +11,12 @@ import re
 import time
 import random
 
+bert_embedding = BertEmbedding(model='bert_24_1024_16',
+                               dataset_name='book_corpus_wiki_en_uncased')
+
 
 DIR_PATH = DIR_PATH = os.path.abspath(os.path.dirname(__file__))
-DATASET = 'data/gen1.pickle'
+DATASET = 'data/prefix_data.pickle'
 DATA_PATH = os.path.join(DIR_PATH, DATASET)
 
 # Data constraints
@@ -26,10 +27,10 @@ EQUALS_SIGN = False
 # Hyperparameters
 EMBED_DIM = 32
 NUM_HEADS = 8
-NUM_DECODER = 4
-NUM_ENCODER = 4
-DFF = 128
-DROPOUT = 0.01
+NUM_DECODER = 2
+NUM_ENCODER = 2
+DFF = 256
+DROPOUT = 0.05
 
 EPOCHS = 20
 BATCH_SIZE = 16
@@ -38,7 +39,7 @@ SHUFFLE = True
 # Adam params
 BETA_1 = 0.98
 BETA_2 = 0.99
-EPSILON = 1e-8
+EPSILON = 1e-9
 LEARNING = 0.001
 
 # Random seed for consistency
@@ -106,15 +107,9 @@ source_tokens = []
 target_tokens = []
 
 test_tokens = []
-test_target_tokens = []
-
 
 # Generate dictionaries
 examples = read_data_from_file(DATA_PATH)
-if len(examples) > 20000:
-    examples = examples[:20000]
-
-print(f"{len(examples)} examples loaded.")
 
 # Mix up the problems
 print(f"Shuffling data with seed: {SEED}")
@@ -143,205 +138,138 @@ def reduced_representation(embedding):
     return small_em
 
 
-progress_increment = 1
+def build_token_dict(problem_list):
+    token_dict = {
+        '<PAD>': 1,
+        '<START>': 2,
+        '<END>': 3,
+    }
+
+    for problem in problem_list:
+        for tokens in problem:
+            word = tokens[0]
+            embedding = tokens[1]
+
+            if word not in token_dict:
+                # Assign a lookup to a piece of the BERT representation
+                token_dict[word] = embedding
+
+    return token_dict
+
+
+problem_number = 1
 for example in examples[:train_size]:
-    progress = int((progress_increment / len(examples)) * 100)
-    progress_increment += 1
+    progress = int(problem_number / len(examples)) * 100
+    problem_number += 1
     print('Progress: [%d%%]\r' % progress, end="")
     try:
         problem = get_as_tuple(example)
         text = problem[0]
         equation = problem[1]
-
-        source_tokens.append(text)
+        # The text
+        mwp = text.split(' ')
+        mwp = reduced_representation(bert_embedding(mwp))
+        source_tokens.append(mwp)
         # The equation translation
         if not EQUALS_SIGN:
-            e = expressionize(equation)
+            e = expressionize(equation).split(' ')
+            e = reduced_representation(bert_embedding(e))
             target_tokens.append(e)
         else:
-            target_tokens.append(equation)
+            e = equation.split(' ')
+            e = reduced_representation(bert_embedding(e))
+            target_tokens.append(e)
     except:
         pass
 
 for example in examples[train_size:]:
-    progress = int((progress_increment / len(examples)) * 100)
-    progress_increment += 1
+    progress = int((problem_number / len(examples)) * 100)
+    problem_number += 1
     print('Progress: [%d%%]\r' % progress, end="")
     # Encode only the questions for testing the translation
     try:
-        problem = get_as_tuple(example)
-        text = problem[0]
-        equation = problem[1]
-
-        test_tokens.append(text)
-        # The equation translation
-        if not EQUALS_SIGN:
-            e = expressionize(equation)
-            test_target_tokens.append(e)
-        else:
-            test_target_tokens.append(equation)
+        text = get_as_tuple(example)[0]
+        # The text
+        mwp = text.split(' ')
+        mwp = reduced_representation(bert_embedding(mwp))
+        test_tokens.append(mwp)
     except:
         pass
-print()
-
-print("Building dataframe...")
-
-progress_increment = 1
-# All problems and equations
-simple_corpus_sentences = []
-combination = source_tokens + test_tokens + target_tokens + test_target_tokens
-for problem in combination:
-    progress = int((progress_increment / len(combination)) * 100)
-    progress_increment += 1
-    print('Progress: [%d%%]\r' % progress, end="")
-    simple_corpus_sentences.append(problem)
-print()
-
-df_clean = pd.DataFrame({'clean': simple_corpus_sentences})
-df_clean = df_clean.dropna().drop_duplicates()
-
-# Space split questions and equations
-sentences = [row.split() for row in df_clean['clean']]
-words = []
-
-print("Extracting words from sentences...")
-
-progress_increment = 1
-for sentence in sentences:
-    progress = int((progress_increment / len(sentences)) * 100)
-    progress_increment += 1
-    print('Progress: [%d%%]\r' % progress, end="")
-    for word in sentences:
-        words.append(word)
-print()
-
-print("Training W2V model...")
-
-
-w2v_model = Word2Vec(min_count=1,
-                     window=3,
-                     size=1,
-                     alpha=0.03,
-                     min_alpha=0.0007,
-                     negative=5,
-                     seed=SEED)
-
-w2v_model.build_vocab(words)
-
-w2v_model.train(words,
-                total_examples=w2v_model.corpus_count,
-                epochs=10,
-                report_delay=1)
-
-# The question text dictionary
-token_dict = {
-    "<PAD>": 3,
-    "<START>": 1,
-    "<END>": 2
-}
-
-print("Creating lookup table from vocabulary...")
-
-for sentence in sentences:
-    for word in sentence:
-        token_dict[word] = w2v_model.wv[word].item(0)
-
-
-print("Encoding inputs...")
-
-
-def wrap(sentence_list, start_token=True):
-    problems = []
-
-    for sentence in sentence_list:
-        arr = []
-        if start_token:
-            arr.append("<START>")
-
-        for word in sentence.split(' '):
-            if len(word) > 0:
-                arr.append(word)
-
-        arr.append('<END>')
-
-        if not start_token:
-            arr.append("<PAD>")
-
-        problems.append(arr)
-
-    return problems
-
-
-# Add special tokens
-encode_tokens = wrap(source_tokens)
-decode_tokens = wrap(target_tokens)
-output_tokens = wrap(target_tokens, start_token=False)
-
-# Do the same for the test data
-ttokens = wrap(test_tokens)
-dttokens = wrap(test_target_tokens)
-ottokens = wrap(test_target_tokens, start_token=False)
-
-
-def serialize_w2v(tokens, dim=False):
-    vecProbs = []
-    for problem in tokens:
-        vecProb = []
-
-        for token in problem:
-            embedding = token_dict[token]
-            if isinstance(embedding, np.ndarray):
-                for vex in np.nditer(embedding):
-                    if not dim:
-                        vecProb.append(vex.item(0))
-                    else:
-                        vecProb.append([vex.item(0)])
-
-            else:
-                if not dim:
-                    vecProb.append(embedding)
-                else:
-                    vecProb.append([embedding])
-
-        vecProbs.append(vecProb)
-
-    return vecProbs
-
-
-encoded_input = serialize_w2v(encode_tokens)
-decoded_input = serialize_w2v(decode_tokens)
-decoded_output = serialize_w2v(output_tokens, dim=True)
-
-tencoded_input = serialize_w2v(ttokens)
-tdecoded_input = serialize_w2v(dttokens)
-tdecoded_output = serialize_w2v(ottokens, dim=True)
-
-print("Padding the embeddedings...")
-
-# Pad to max length of input set
-source_max_len = max(map(len, encoded_input))
-target_max_len = max(map(len, decoded_input))
-# Padding length for the training set
-tsource_max_len = max(map(len, tencoded_input))
-ttarget_max_len = max(map(len, tdecoded_input))
-
-# Padding for each encoding
-encoded_input = [tokens + [token_dict["<PAD>"]] *
-                 (source_max_len - len(tokens)) for tokens in encoded_input]
-decoded_input = [tokens + [token_dict["<PAD>"]] *
-                 (target_max_len - len(tokens)) for tokens in decoded_input]
-output_tokens = [tokens + [[token_dict["<PAD>"]]] *
-                 (target_max_len - len(tokens)) for tokens in decoded_output]
-
-
-tencoded_input = [tokens + [token_dict["<PAD>"]] *
-                  (tsource_max_len - len(tokens)) for tokens in tencoded_input]
-tdecoded_input = [tokens + [token_dict["<PAD>"]] *
-                  (ttarget_max_len - len(tokens)) for tokens in tdecoded_input]
-toutput_tokens = [tokens + [[token_dict["<PAD>"]]] *
-                  (ttarget_max_len - len(tokens)) for tokens in tdecoded_output]
 
 print("...done.")
+
+print("Building lookup table from vocabulary...")
+
+# Token to np arrays
+# The question text dictionary
+source_token_dict = build_token_dict(source_tokens)
+# The equation dictionary
+target_token_dict = build_token_dict(target_tokens)
+
+print("...done.")
+
+
+def get_bert_encoded_input(problems, output_embedding=False):
+    encoded_tokens = []
+
+    for problem in problems:
+        if output_embedding == False:
+            p = [source_token_dict["<START>"]]
+        else:
+            p = []
+
+        for token in problem:
+            # (token, value)
+            # Append only the representation of the word
+            if output_embedding == False:
+                p.append(token[1])
+            else:
+                p.append([token[1]])
+
+        if output_embedding:
+            p.append([source_token_dict["<END>"]])
+            p.append([source_token_dict["<PAD>"]])
+        else:
+            p.append(source_token_dict["<END>"])
+
+        encoded_tokens.append(p)
+
+    return encoded_tokens
+
+
+print("Building reverse lookup table...")
+
+# Problem vocab lookup table
+target_token_dict_inv = {}
+for k, v in target_token_dict.items():
+    # Value is array of np arrays
+    target_token_dict_inv[f"{v}"] = k
+
+encoded_input = get_bert_encoded_input(source_tokens)
+decoded_input = get_bert_encoded_input(target_tokens)
+test_input = get_bert_encoded_input(test_tokens)
+
+output_embedding = get_bert_encoded_input(target_tokens, output_embedding=True)
+
+print("...done.")
+
+# Pad to max length of input sets
+source_max_len = max(map(len, encoded_input))
+target_max_len = max(map(len, decoded_input))
+
+print("Padding the embedded problem text...")
+
+# Padding for each encoding
+encoded_input = [tokens + [source_token_dict["<PAD>"]] *
+                 (source_max_len - len(tokens)) for tokens in encoded_input]
+decoded_input = [tokens + [source_token_dict["<PAD>"]] *
+                 (target_max_len - len(tokens)) for tokens in decoded_input]
+
+print("Padding the embedded expressions...")
+output_embedding = [tokens + [[source_token_dict["<PAD>"]]] *
+                    (target_max_len - len(tokens)) for tokens in output_embedding]
+
+print("...Done.")
 
 print("Building the Transformer...")
 log(DATASET)
@@ -357,14 +285,14 @@ log(f"Shuffle: {SHUFFLE}")
 
 # Build & fit model
 model = get_model(
-    token_num=len(token_dict),
+    token_num=max(len(source_token_dict), len(target_token_dict)),
     embed_dim=EMBED_DIM,
     encoder_num=NUM_ENCODER,
     decoder_num=NUM_DECODER,
     head_num=NUM_HEADS,
     hidden_dim=DFF,
     dropout_rate=DROPOUT,
-    use_same_embed=True
+    use_same_embed=True,  # Use different embeddings for different languages
 )
 
 optimizer = optimizers.Adam(lr=LEARNING,
@@ -382,7 +310,7 @@ model.summary()
 
 # Input shapes
 X = [np.array(encoded_input), np.array(decoded_input)]
-y = np.array(output_tokens)
+y = np.array(output_embedding)
 
 print(X[0].shape, X[1].shape, y.shape)
 
@@ -413,28 +341,25 @@ model.save(MODEL_FILE)
 
 print("Model saved.")
 
-print("Evaluating on test data...")
-
-Xt = [np.array(tencoded_input), np.array(tdecoded_input)]
-yt = np.array(toutput_tokens)
-
-model.evaluate(x=Xt,
-               y=yt)
+print(test_input)
 
 # Predict with Beam Search
 decoded = decode(
     model,
-    tencoded_input,
-    start_token=token_dict['<START>'],
-    end_token=token_dict['<END>'],
-    pad_token=token_dict['<PAD>'],
+    test_input,
+    start_token=target_token_dict['<START>'],
+    end_token=target_token_dict['<END>'],
+    pad_token=target_token_dict['<PAD>'],
     top_k=10,
     temperature=1.0,
 )
 
-# print(decoded)
+print(decoded)
+exit()
+
 # Make predictions
-# for i in range(len(test_tokens) - 1):
-#    prediction = ' '.join(decoded[i][1:-1])
-#    print(prediction)
-#    log(prediction)
+for i in range(len(test_tokens) - 1):
+    prediction = ''.join(
+        map(lambda x: target_token_dict_inv[x], decoded[i][1:-1]))
+    print(prediction)
+    log(prediction)
