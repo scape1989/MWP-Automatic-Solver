@@ -1,18 +1,9 @@
-FROM tensorflow/tensorflow:nightly-gpu
+FROM tensorflow/tensorflow:2.0.0b1-gpu-py3
+
 WORKDIR /home/mwp
 ADD . /home/mwp
 
-RUN chmod -R 777 /home/mwp
-RUN mkdir /.mxnet
-RUN chmod -R 777 /.mxnet
-
-RUN apt-get install -y python3-pip
-RUN apt-get install -y python3.7
-
-RUN pip3 install bert-embedding
-RUN pip3 install tensorflow-gpu
-RUN pip3 install tensorflow-datasets
-RUN pip3 install keras-transformer
-RUN pip3 install nltk
-RUN pip3 install gensim
-RUN pip3 install pandas
+RUN pip install keras
+RUN pip install tensorflow-datasets
+RUN pip install numpy
+RUN pip install nltk

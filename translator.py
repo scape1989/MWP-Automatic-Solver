@@ -1,64 +1,74 @@
-from __future__ import absolute_import
+from __future__ import absolute_import, division, print_function, unicode_literals
 
-from keras_transformer import get_model, decode
-from keras import callbacks, metrics, optimizers
+import tensorflow as tf
+import tensorflow_datasets as tfds
+# The model
+from models.transformer.MultiHeadAttention import MultiHeadAttention
+from models.transformer.EncoderLayer import EncoderLayer
+from models.transformer.Encoder import Encoder
+from models.transformer.DecoderLayer import DecoderLayer
+from models.transformer.Decoder import Decoder
+from models.transformer.Transformer import Transformer
+from models.transformer.CustomSchedule import CustomSchedule
+from models.transformer.network import create_masks, loss_function
 from keras import backend as K
-from bert_embedding import BertEmbedding
+from nltk.translate.bleu_score import sentence_bleu
+# Utilities
+import time
 import numpy as np
 import os
-import pickle
 import re
-import time
+import pickle
 import random
 
-bert_embedding = BertEmbedding(model='bert_24_1024_16',
-                               dataset_name='book_corpus_wiki_en_uncased')
 
-
-DIR_PATH = DIR_PATH = os.path.abspath(os.path.dirname(__file__))
-DATASET = 'data/prefix_data.pickle'
+DIR_PATH = os.path.abspath(os.path.dirname(__file__))
+# Select the dataset to train with
+DATASET = 'data/gen1.pickle'
 DATA_PATH = os.path.join(DIR_PATH, DATASET)
-
-# Data constraints
 VALIDATION_SPLIT = 0.1
 TEST_RESERVE = 0.05
 EQUALS_SIGN = False
 
+# SubwordTextEncoder / TextEncoder
+ENCODE_METHOD = tfds.features.text.SubwordTextEncoder
+
+# Data constraints
+BUFFER_SIZE = 20000
+MAX_LENGTH = 50
+
 # Hyperparameters
-EMBED_DIM = 32
+NUM_LAYERS = 6
+D_MODEL = 64
+DFF = 1024
 NUM_HEADS = 8
-NUM_DECODER = 2
-NUM_ENCODER = 2
-DFF = 256
 DROPOUT = 0.05
 
+# Training settings
 EPOCHS = 20
-BATCH_SIZE = 16
-SHUFFLE = True
+BATCH_SIZE = 32
 
-# Adam params
-BETA_1 = 0.98
-BETA_2 = 0.99
+# Adam optimizer params
+BETA_1 = 0.9
+BETA_2 = 0.98
 EPSILON = 1e-9
-LEARNING = 0.001
 
-# Random seed for consistency
+# Random seed for shuffling the data
 SEED = 1234
 
 # The name to keep track of any changes
-MODEL_NAME = f"t{EPOCHS}_{DFF}_{NUM_HEADS}_{BATCH_SIZE}_{int(time.time())}"
-TRAINED_PATH = os.path.join(DIR_PATH,
-                            f'models/trained/{MODEL_NAME}/')
-LOG_FILE = os.path.join(DIR_PATH,
-                        f'logs/{MODEL_NAME}.csv')
+MODEL_NAME = f"x{EPOCHS}_{DFF}_{NUM_HEADS}_{BATCH_SIZE}_{int(time.time())}"
+# The checkpoint file where the trained weights will be saved
+# Only saves on finish
 MODEL_FILE = os.path.join(DIR_PATH,
-                          f'models/trained/{MODEL_NAME}.h5')
+                          f'models/trained/{MODEL_NAME}.ckpt')
 
+# Set the seed for random
 random.seed(SEED)
 
 
 def read_data_from_file(path):
-    # Load binary file and return the array of lines
+    # Get the lines in the binary
     with open(path, "rb") as fh:
         file_data = pickle.load(fh)
 
@@ -66,10 +76,9 @@ def read_data_from_file(path):
 
 
 def get_as_tuple(example):
-    # Each example in the data is an array of tuples
+    # Separate the trainable data
     ex_as_dict = dict(example)
 
-    # Return the information we need from the set
     return ex_as_dict["question"], ex_as_dict["equation"]
 
 
@@ -80,286 +89,308 @@ def log(what):
 
 
 def expressionize(what):
-    # Strip out x =
+    # It may help training if the 'x =' is not learned
     return re.sub(r"([a-z] \=|\= [a-z])", "", what)
 
 
-def f1(y_true, y_pred):
-    def recall(y_true, y_pred):
-        true_positives = K.sum(K.round(K.clip(y_true * y_pred, 0, 1)))
-        possible_positives = K.sum(K.round(K.clip(y_true, 0, 1)))
-        recall = true_positives / (possible_positives + K.epsilon())
-        return recall
-
-    def precision(y_true, y_pred):
-        true_positives = K.sum(K.round(K.clip(y_true * y_pred, 0, 1)))
-        predicted_positives = K.sum(K.round(K.clip(y_pred, 0, 1)))
-        precision = true_positives / (predicted_positives + K.epsilon())
-        return precision
-
-    precision = precision(y_true, y_pred)
-    recall = recall(y_true, y_pred)
-
-    return 2 * ((precision * recall) / (precision + recall + K.epsilon()))
+def plog(what):
+    # Print then log
+    print(what)
+    log(what)
 
 
-source_tokens = []
-target_tokens = []
+def main():
+    print("Starting the Math Word Problem (MWP) Transformer training.")
+    print(f"\nTokenizing data from {DATASET}...\n")
 
-test_tokens = []
+    examples = read_data_from_file(DATA_PATH)
 
-# Generate dictionaries
-examples = read_data_from_file(DATA_PATH)
+    print(f"Shuffling data with seed: {SEED}")
+    random.shuffle(examples)
 
-# Mix up the problems
-print(f"Shuffling data with seed: {SEED}")
-random.shuffle(examples)
+    train_text = []
+    train_equations = []
 
-train_size = len(examples) - int(TEST_RESERVE * len(examples))
-log(f"{len(examples) - train_size}/{train_size + (len(examples) - train_size)} problems reverved for testing.")
+    val_text = []
+    val_equations = []
 
-print("Tokenizing data...")
+    split_point = int((1 - VALIDATION_SPLIT) * len(examples))
 
-
-def reduced_representation(embedding):
-    # Due to memory constraints, use only the first element in each
-    #  representation array given by BERT
-    # ! Using the full array does work if you have the capacity
-    small_em = []
-
-    for token in embedding:
+    # Get training examples
+    for example in examples[:split_point]:
         try:
-            tok = "".join(token[0])
-            rep = token[1][0].item(0)
-            pair = (tok, rep)
-            small_em.append(pair)
+            # The text
+            train_text.append(get_as_tuple(example)[0])
+            # The equation translation
+            if not EQUALS_SIGN:
+                e = expressionize(get_as_tuple(example)[1])
+
+                train_equations.append(e)
+            else:
+                train_equations.append(get_as_tuple(example)[1])
+
+        except:
+            # Some of the filtered questions are empty... Working on a fix
+            pass
+
+    # Sample section of the training data for testing
+    # Remove the samples from the training data
+    test_split = int(TEST_RESERVE * len(train_text))
+    if test_split > 50:
+        test_split = 50
+
+    test_text = train_text[:test_split]
+    train_text = train_text[test_split:]
+    test_equations = train_equations[:test_split]
+    train_equations = train_equations[test_split:]
+
+    # Get validation examples
+    for example in examples[split_point:]:
+        try:
+            # The text
+            val_text.append(get_as_tuple(example)[0])
+            # The equation translation
+            if not EQUALS_SIGN:
+                e = expressionize(get_as_tuple(example)[1])
+
+                val_equations.append(e)
+            else:
+                val_equations.append(get_as_tuple(example)[1])
         except:
             pass
-    return small_em
+
+    print(f"Data split <- {len(train_text)}:{len(val_text)}:{len(test_text)}")
+
+    # Convert arrays to TensorFlow constants
+    train_text_const = tf.constant(train_text)
+    train_eq_const = tf.constant(train_equations)
+    val_text_const = tf.constant(val_text)
+    val_eq_const = tf.constant(val_equations)
+
+    # Turn the constants into TensorFlow Datasets
+    # Training
+    t_dataset = tf.data.Dataset.from_tensor_slices((train_text_const,
+                                                    train_eq_const))
+    # Validation
+    v_dataset = tf.data.Dataset.from_tensor_slices((val_text_const,
+                                                    val_eq_const))
+
+    print("Building vocabulary...")
+
+    # Create data tokenizers
+    tokenizer_txt = ENCODE_METHOD.build_from_corpus(
+        (txt.numpy() for txt, eq in t_dataset), target_vocab_size=2**15)
+
+    tokenizer_eq = ENCODE_METHOD.build_from_corpus(
+        (eq.numpy() for txt, eq in t_dataset), target_vocab_size=2**15)
+
+    def encode(lang1, lang2):
+        lang1 = [tokenizer_txt.vocab_size] + tokenizer_txt.encode(
+            lang1.numpy()) + [tokenizer_txt.vocab_size + 1]
+
+        lang2 = [tokenizer_eq.vocab_size] + tokenizer_eq.encode(
+            lang2.numpy()) + [tokenizer_eq.vocab_size + 1]
+
+        return lang1, lang2
+
+    def filter_max_length(x, y, max_length=MAX_LENGTH):
+        return tf.logical_and(tf.size(x) <= max_length,
+                              tf.size(y) <= max_length)
+
+    def tf_encode(txt, eq):
+        return tf.py_function(encode, [txt, eq], [tf.int64, tf.int64])
+
+    print("Encoding inputs...")
+
+    train_dataset = t_dataset.map(tf_encode)
+    train_dataset = train_dataset.filter(filter_max_length)
+    # Cache the dataset to memory to get a speedup while reading from it.
+    train_dataset = train_dataset.cache()
+    train_dataset = train_dataset.padded_batch(BATCH_SIZE,
+                                               padded_shapes=([-1], [-1]))
+    train_dataset = train_dataset.prefetch(tf.data.experimental.AUTOTUNE)
+
+    val_dataset = v_dataset.map(tf_encode)
+    val_dataset = val_dataset.filter(filter_max_length).padded_batch(BATCH_SIZE,
+                                                                     padded_shapes=([-1], [-1]))
+
+    input_vocab_size = tokenizer_txt.vocab_size + 2
+    target_vocab_size = tokenizer_eq.vocab_size + 2
+
+    print("...done.")
+    print("\nDefining the Transformer model...")
+
+    # Using the Adam optimizer
+    optimizer = tf.keras.optimizers.Adam(CustomSchedule(D_MODEL),
+                                         beta_1=BETA_1,
+                                         beta_2=BETA_2,
+                                         epsilon=EPSILON)
+
+    train_loss = tf.keras.metrics.Mean(name="train_loss")
+    train_acc = tf.keras.metrics.SparseCategoricalAccuracy(
+        name='train_acc')
+
+    def print_epoch(epoch, batch):
+        epoch_information = "Epoch {} Batch {} Loss {:.4f} Accuracy {:.4f}".format(
+            epoch + 1, batch, train_loss.result(), train_acc.result())
+        # Overwrite the line to see live updated results
+        print(f"{epoch_information}\r", end="")
+
+    transformer = Transformer(NUM_LAYERS,
+                              D_MODEL,
+                              NUM_HEADS,
+                              DFF,
+                              input_vocab_size,
+                              target_vocab_size,
+                              DROPOUT)
+
+    print('...done.')
+    print('\nTraining...')
+
+    @tf.function
+    def train_step(inp, tar):
+        tar_inp = tar[:, :-1]
+        tar_real = tar[:, 1:]
+
+        enc_padding_mask, combined_mask, dec_padding_mask = create_masks(inp,
+                                                                         tar_inp)
+
+        with tf.GradientTape() as tape:
+            # predictions.shape == (batch_size, seq_len, vocab_size)
+            predictions, _ = transformer(inp, tar_inp,
+                                         True,
+                                         enc_padding_mask,
+                                         combined_mask,
+                                         dec_padding_mask)
+
+            loss = loss_function(tar_real, predictions)
+
+        gradients = tape.gradient(loss,
+                                  transformer.trainable_variables)
+
+        optimizer.apply_gradients(zip(gradients,
+                                      transformer.trainable_variables))
+
+        train_loss(loss)
+        train_acc(tar_real, predictions)
+
+    # Log all the settings used in the session
+    log(MODEL_NAME)
+    log(MODEL_FILE)
+    log(DATASET)
+    log(f"Data split <- {len(train_text)}:{len(val_text)}:{len(test_text)}")
+    log(f"Random Shuffle Seed: {SEED}")
+    log(f"\nEpochs: {EPOCHS}")
+    log(f"Batch Size: {BATCH_SIZE}")
+    log(f"Buffer Size: {BUFFER_SIZE}")
+    log(f"Max Length: {MAX_LENGTH}")
+    log(f"Equals Sign: {EQUALS_SIGN}")
+    log(f"Layers: {NUM_LAYERS}")
+    log(f"Heads: {NUM_HEADS}")
+    log(f"Model Depth: {D_MODEL}")
+    log(f"Feed Forward Depth: {DFF}")
+    log(f"Dropout: {DROPOUT}\n")
+    log(f"Adam Params: b1{BETA_1} b2{BETA_2} e{EPSILON}\n")
+
+    # Train
+    for epoch in range(EPOCHS):
+        start = time.time()
+
+        train_loss.reset_states()
+        train_acc.reset_states()
+
+        # inp -> MWP, tar -> Equation
+        for (batch, (inp, tar)) in enumerate(train_dataset):
+            train_step(inp, tar)
+
+            print_epoch(epoch, batch)
+
+        if epoch == (EPOCHS - 1):
+            # Save a checkpoint of model weights
+            transformer.save_weights(MODEL_FILE)
+            print(f'Saved {MODEL_NAME}\n')
+
+        print_epoch(epoch, batch)
+        # Save a log of the epoch results
+        log(f"Epoch {epoch + 1}: loss {train_loss.result()} acc {train_acc.result()}")
+
+        # Clear the line being overwritten by print_epoch
+        print()
+        # Calculate the time the epoch took to complete
+        # The first epoch seems to take significantly longer than the others
+        print(f'Epoch took {int(time.time() - start)}s\n')
+
+    print('...done.')
+    print(f'\nTesting translations after {EPOCHS} epochs...')
+
+    def evaluate(inp_sentence):
+        start_token = [tokenizer_txt.vocab_size]
+        end_token = [tokenizer_txt.vocab_size + 1]
+
+        # The input is a MWP, hence adding the start and end token
+        inp_sentence = start_token + \
+            tokenizer_txt.encode(inp_sentence) + end_token
+        encoder_input = tf.expand_dims(inp_sentence, 0)
+
+        # The target is an equation, the first word to the transformer should be the
+        # equation start token.
+        decoder_input = [tokenizer_eq.vocab_size]
+        output = tf.expand_dims(decoder_input, 0)
+
+        for i in range(MAX_LENGTH):
+            enc_padding_mask, combined_mask, dec_padding_mask = create_masks(encoder_input,
+                                                                             output)
+
+            # predictions.shape == (batch_size, seq_len, vocab_size)
+            predictions, attention_weights = transformer(encoder_input,
+                                                         output,
+                                                         False,
+                                                         enc_padding_mask,
+                                                         combined_mask,
+                                                         dec_padding_mask)
+
+            # select the last word from the seq_len dimension
+            predictions = predictions[:, -1:, :]  # (batch_size, 1, vocab_size)
+
+            predicted_id = tf.cast(tf.argmax(predictions, axis=-1), tf.int32)
+
+            # return the result if the predicted_id is equal to the end token
+            if tf.equal(predicted_id, tokenizer_eq.vocab_size + 1):
+                return tf.squeeze(output, axis=0), attention_weights
+
+            # concatentate the predicted_id to the output which is given to the decoder
+            # as its input.
+            output = tf.concat([output, predicted_id], axis=-1)
+
+        return tf.squeeze(output, axis=0), attention_weights
+
+    def translate(sentence, translation):
+        # Translate from MWP to equation
+        result, attention_weights = evaluate(sentence)
+
+        predicted_equation = tokenizer_eq.decode([i for i in result
+                                                  if i < tokenizer_eq.vocab_size])
+        # Print and log the translations of the test data
+        plog(f"Input: {sentence}\nHypothesis: {predicted_equation}")
+        plog(f"Real Translation: {translation}")
+
+        return predicted_equation, translation
+
+    # Test the model's translations
+    # Record the BLEU 1-gram score
+    # I want to add F1 too...
+    for i in range(test_text):
+        # Test at most 50 problems
+        predicted, actual = translate(test_text[i], test_equations[i])
+        # Turn the prediction and actual translation to arrays of words
+        bleu_pred = predicted.split(' ')
+        bleu_act = actual.split(' ')
+        score = f"BLEU 1-gram: {sentence_bleu(bleu_act, bleu_pred, weights=(1, 0, 0, 0))}"
+        # Print and log the BLEU translation metric
+        plog(score)
+
+    print('...done. Script complete.')
 
 
-def build_token_dict(problem_list):
-    token_dict = {
-        '<PAD>': 1,
-        '<START>': 2,
-        '<END>': 3,
-    }
-
-    for problem in problem_list:
-        for tokens in problem:
-            word = tokens[0]
-            embedding = tokens[1]
-
-            if word not in token_dict:
-                # Assign a lookup to a piece of the BERT representation
-                token_dict[word] = embedding
-
-    return token_dict
-
-
-problem_number = 1
-for example in examples[:train_size]:
-    progress = int(problem_number / len(examples)) * 100
-    problem_number += 1
-    print('Progress: [%d%%]\r' % progress, end="")
-    try:
-        problem = get_as_tuple(example)
-        text = problem[0]
-        equation = problem[1]
-        # The text
-        mwp = text.split(' ')
-        mwp = reduced_representation(bert_embedding(mwp))
-        source_tokens.append(mwp)
-        # The equation translation
-        if not EQUALS_SIGN:
-            e = expressionize(equation).split(' ')
-            e = reduced_representation(bert_embedding(e))
-            target_tokens.append(e)
-        else:
-            e = equation.split(' ')
-            e = reduced_representation(bert_embedding(e))
-            target_tokens.append(e)
-    except:
-        pass
-
-for example in examples[train_size:]:
-    progress = int((problem_number / len(examples)) * 100)
-    problem_number += 1
-    print('Progress: [%d%%]\r' % progress, end="")
-    # Encode only the questions for testing the translation
-    try:
-        text = get_as_tuple(example)[0]
-        # The text
-        mwp = text.split(' ')
-        mwp = reduced_representation(bert_embedding(mwp))
-        test_tokens.append(mwp)
-    except:
-        pass
-
-print("...done.")
-
-print("Building lookup table from vocabulary...")
-
-# Token to np arrays
-# The question text dictionary
-source_token_dict = build_token_dict(source_tokens)
-# The equation dictionary
-target_token_dict = build_token_dict(target_tokens)
-
-print("...done.")
-
-
-def get_bert_encoded_input(problems, output_embedding=False):
-    encoded_tokens = []
-
-    for problem in problems:
-        if output_embedding == False:
-            p = [source_token_dict["<START>"]]
-        else:
-            p = []
-
-        for token in problem:
-            # (token, value)
-            # Append only the representation of the word
-            if output_embedding == False:
-                p.append(token[1])
-            else:
-                p.append([token[1]])
-
-        if output_embedding:
-            p.append([source_token_dict["<END>"]])
-            p.append([source_token_dict["<PAD>"]])
-        else:
-            p.append(source_token_dict["<END>"])
-
-        encoded_tokens.append(p)
-
-    return encoded_tokens
-
-
-print("Building reverse lookup table...")
-
-# Problem vocab lookup table
-target_token_dict_inv = {}
-for k, v in target_token_dict.items():
-    # Value is array of np arrays
-    target_token_dict_inv[f"{v}"] = k
-
-encoded_input = get_bert_encoded_input(source_tokens)
-decoded_input = get_bert_encoded_input(target_tokens)
-test_input = get_bert_encoded_input(test_tokens)
-
-output_embedding = get_bert_encoded_input(target_tokens, output_embedding=True)
-
-print("...done.")
-
-# Pad to max length of input sets
-source_max_len = max(map(len, encoded_input))
-target_max_len = max(map(len, decoded_input))
-
-print("Padding the embedded problem text...")
-
-# Padding for each encoding
-encoded_input = [tokens + [source_token_dict["<PAD>"]] *
-                 (source_max_len - len(tokens)) for tokens in encoded_input]
-decoded_input = [tokens + [source_token_dict["<PAD>"]] *
-                 (target_max_len - len(tokens)) for tokens in decoded_input]
-
-print("Padding the embedded expressions...")
-output_embedding = [tokens + [[source_token_dict["<PAD>"]]] *
-                    (target_max_len - len(tokens)) for tokens in output_embedding]
-
-print("...Done.")
-
-print("Building the Transformer...")
-log(DATASET)
-log(f"\nEpochs: {EPOCHS}")
-log(f"Equals Sign: {EQUALS_SIGN}")
-log(f"Heads: {NUM_HEADS}")
-log(f"Encoders: {NUM_ENCODER}")
-log(f"Decoders: {NUM_DECODER}")
-log(f"Batch Size: {BATCH_SIZE}")
-log(f"Feed Forward Depth: {DFF}")
-log(f"Dropout: {DROPOUT}")
-log(f"Shuffle: {SHUFFLE}")
-
-# Build & fit model
-model = get_model(
-    token_num=max(len(source_token_dict), len(target_token_dict)),
-    embed_dim=EMBED_DIM,
-    encoder_num=NUM_ENCODER,
-    decoder_num=NUM_DECODER,
-    head_num=NUM_HEADS,
-    hidden_dim=DFF,
-    dropout_rate=DROPOUT,
-    use_same_embed=True,  # Use different embeddings for different languages
-)
-
-optimizer = optimizers.Adam(lr=LEARNING,
-                            beta_1=BETA_1,
-                            beta_2=BETA_2,
-                            epsilon=EPSILON)
-
-model.compile(optimizer=optimizer,
-              loss='sparse_categorical_crossentropy',
-              metrics=[f1])
-
-print("...Done.")
-
-model.summary()
-
-# Input shapes
-X = [np.array(encoded_input * 1024), np.array(decoded_input * 1024)]
-y = np.array(output_embedding * 1024)
-
-print(X[0].shape, X[1].shape, y.shape)
-
-print("Training...")
-
-model.fit(x=X,
-          y=y,
-          epochs=EPOCHS,
-          batch_size=BATCH_SIZE,
-          shuffle=SHUFFLE,
-          validation_split=VALIDATION_SPLIT,
-          callbacks=[callbacks.ModelCheckpoint(TRAINED_PATH,
-                                               monitor='val_acc',
-                                               save_best_only=True),
-                     callbacks.TensorBoard(log_dir='./tensorboard',
-                                           batch_size=BATCH_SIZE),
-                     callbacks.ReduceLROnPlateau(monitor='val_loss',
-                                                 factor=0.2,
-                                                 patience=5,
-                                                 min_lr=0.001),
-                     callbacks.CSVLogger(LOG_FILE,
-                                         append=True), ]
-          )
-
-print("...Done.")
-
-model.save(MODEL_FILE)
-
-print("Model saved.")
-
-print(test_input)
-
-# Predict with Beam Search
-decoded = decode(
-    model,
-    test_input,
-    start_token=target_token_dict['<START>'],
-    end_token=target_token_dict['<END>'],
-    pad_token=target_token_dict['<PAD>'],
-    top_k=10,
-    temperature=1.0,
-)
-
-print(decoded)
-exit()
-
-# Make predictions
-for i in range(len(test_tokens) - 1):
-    prediction = ''.join(
-        map(lambda x: target_token_dict_inv[x], decoded[i][1:-1]))
-    print(prediction)
-    log(prediction)
+if __name__ == "__main__":
+    main()

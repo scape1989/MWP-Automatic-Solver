@@ -1,3 +1,3 @@
 #!/bin/bash
 
-docker run --rm -u $(id -u):$(id -g) -v $(pwd):/home/mwp -it --runtime=nvidia -e NVIDIA_VISIBLE_DEVICES=0 kaden/mwp bash
+docker run --rm -u $(id -u):$(id -g) -v $(pwd):/home/mwp -it --runtime=nvidia -e NVIDIA_VISIBLE_DEVICES=0 kaden/mwp2.0.0 bash
