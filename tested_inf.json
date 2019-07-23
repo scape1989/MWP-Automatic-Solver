@@ -1,0 +1,1 @@
+{"dataset": "train_infix.pickle", "test": "infix", "seed": 1911, "model": "t_6_8_512_512_1563485983", "layers": 6, "heads": 8, "d_model": 512, "dff": 512, "lr": 0.0002, "dropout": 0.05, "epochs": 20, "batch": 128, "beta_1": 0.95, "beta_2": 0.99}

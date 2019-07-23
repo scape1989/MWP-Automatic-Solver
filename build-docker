@@ -1,0 +1,3 @@
+#!/bin/bash
+
+docker build --rm -t kaden/mwp2.0.0 . && ./run

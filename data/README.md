@@ -1,19 +1,25 @@
-See statistics.txt file for what the binaries here contain.
+Data file information. All of the binaries are described below.
 
-Data collected thus far is from [AI2 Arithmetic Questions](https://allenai.org/data/data-all.html), [Dolphin18k](https://www.microsoft.com/en-us/research/wp-content/uploads/2015/08/dolphin18k.pdf), and [MaWPS](http://lang.ee.washington.edu/MAWPS/). Data has been compiled to respect only single variable algebra questions. Hopefully multi-var and more calculus-based work will follow. Further work to transform the data to generalize more consistently is being researched currently.
+Testing Split: 10.0%
 
-More datasets will be added to create a more diverse set compared to the data that has recently proven to be less-than-promising. So far, this repo has collected 3688 math word problems.
+Original: 57010 problems
+Debugging Data: 100 problems
 
-All questions in the testing and training data are similar to the following:
-[('question', 'suppose your club is selling candles to raise money. it costs $100 to rent a booth from which to sell the candles. if the candles cost your club $1 each and are sold for $5 each, how many candles must be sold to equal your expenses?\n'), ('answer', '25'), ('equation', 'unkn: m,0=5*m-(100+m)')]
--> Source: Dolphin18k
+Infix Data: 56194 problems
+Prefix Data: 56194 problems
+Postfix Data: 56194 problems
 
-To compile the data to binaries use
-```
-python3 util/create_data.py
-```
+AI2 Train: 356 problems
+Common Core Train: 540 problems
+Illinois Train: 506 problems
+Generated MWPs (gen): 50000 problems
 
-To generate problems for training
-```
-python3 util/generator.py
-```
+AI2 Test (Infix): 39 problems
+AI2 Test (Prefix): 39 problems
+AI2 Test (Postfix): 39 problems
+Common Core Test (Infix): 60 problems
+Common Core Test (Prefix): 60 problems
+Common Core Test (Postfix): 60 problems
+Illinois Test (Infix): 56 problems
+Illinois Test (Prefix): 56 problems
+Illinois Test (Postfix): 56 problems

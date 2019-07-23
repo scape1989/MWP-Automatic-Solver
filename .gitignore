@@ -1,4 +1,6 @@
 **.pickle
 **.bash**
-**events.**
-**keras-transformer/**
+**ckpt-**
+**checkpoint**
+**/tensorflow_datasets/**
+**/trained/**

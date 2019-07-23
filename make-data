@@ -1,0 +1,3 @@
+#!/bin/bash
+
+python3 data/util/generator.py && python3 data/util/create_data.py

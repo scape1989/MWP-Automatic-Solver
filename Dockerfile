@@ -7,3 +7,4 @@ RUN pip install keras
 RUN pip install tensorflow-datasets
 RUN pip install numpy
 RUN pip install nltk
+RUN pip install sympy

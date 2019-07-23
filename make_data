@@ -1,3 +1,0 @@
-#!/bin/bash
-
-python3 util/generate.py && python3 util/create_data.py
