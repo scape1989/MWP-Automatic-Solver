@@ -111,7 +111,7 @@ After training, the program saves your model, and your configuration file is upd
 ---
 
 - Once trained, setting _epochs_ to 0 skips training if you wish to retest your model. This mode also enables the command line input testing. The translator works well when fed data from the training sets, but highly unique user input will most likely not result in the best output equations.
-- To pre-train your model on IMDb reviews, enable the 'pretrain' setting before training on MWP data.
+- To pre-train your model on IMDb reviews, enable the _pretrain_ setting before training on MWP data.
 
 ---
 
