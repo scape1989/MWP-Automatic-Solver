@@ -91,11 +91,11 @@ To use this model create a config JSON file like this:
 From this point, you can run the following command in the container.
 
 ```
+python translator.py config.json 0.0001
+
 // 0.0001 <- Training will stop if loss is below this value.
 // Set it low to complete your trial fully.
 // Default (no argument) is 0.001
-
-python config.json 0.0001
 ```
 
 Alternatively, you can run the _trial_ script, which iterates over all of the config files found in the root directory and completes all epoch iterations you specify.
