@@ -11,16 +11,19 @@ from models.transformer.Decoder import Decoder
 from models.transformer.Transformer import Transformer
 from models.transformer.CustomSchedule import CustomSchedule
 from models.transformer.network import create_masks, loss_function
-from data.util.utils import load_data_from_binary, to_binary, log, plog, get_as_tuple, expressionize, print_epoch
-from data.util.NumberTag import NumberTag
+from data.util.utils import load_data_from_binary, to_binary, get_as_tuple, expressionize, print_epoch
+from data.util.classes.NumberTag import NumberTag
+from data.util.classes.Scorer import Scorer
+from data.util.classes.Logger import Logger
 
 # Utilities
-import time
-import numpy
+import re
 import os
 import sys
 import json
+import time
 import random
+import numpy as np
 
 DIR_PATH = os.path.abspath(os.path.dirname(__file__))
 
@@ -34,8 +37,14 @@ settings = dict(data)
 
 DATASET = settings["dataset"]
 TEST_SET = settings["test"]
+PRETRAIN = settings["pretrain"]
 DATA_PATH = os.path.join(DIR_PATH, "data/" + DATASET)
 EQUALS_SIGN = False
+
+if len(sys.argv) > 2:
+    LOSS_THRESHHOLD = float(sys.argv[2])
+else:
+    LOSS_THRESHHOLD = 0.001
 
 # If fine-tuning set this to a str containing the model name
 CKPT_MODEL = settings["model"]
@@ -46,7 +55,7 @@ ENCODE_METHOD = tfds.features.text.SubwordTextEncoder
 TRAIN_WITH_TAGS = True
 
 # Data constraints
-MAX_LENGTH = 40
+MAX_LENGTH = 60
 
 #|##### TF EXAMPLE ######
 #  num_layers = 4
@@ -60,7 +69,6 @@ D_MODEL = settings["d_model"]
 DFF = settings["dff"]
 NUM_HEADS = settings["heads"]
 DROPOUT = settings["dropout"]
-LEARNING_RATE = settings["lr"]
 
 # Training settings
 EPOCHS = settings["epochs"]
@@ -82,7 +90,7 @@ else:
 
 # The name to keep track of any changes
 if not CONTINUE_FROM_CKPT:
-    MODEL_NAME = f"t_{NUM_LAYERS}_{NUM_HEADS}_{D_MODEL}_{DFF}_{int(time.time())}"
+    MODEL_NAME = f"mwp_{NUM_LAYERS}_{NUM_HEADS}_{D_MODEL}_{DFF}_{int(time.time())}"
 else:
     MODEL_NAME = CKPT_MODEL
     CHECKPOINT_PATH = os.path.join(DIR_PATH,
@@ -96,25 +104,81 @@ if not os.path.isdir(f"models/trained/{MODEL_NAME}"):
 MODEL_PATH = os.path.join(DIR_PATH,
                           f"models/trained/{MODEL_NAME}/")
 
-ARE_TOKENIZERS_PRESENT = os.path.exists(os.path.join(DIR_PATH, f"models/tokenizers/{MODEL_NAME}_t.pickle")) \
-    or os.path.exists(os.path.join(DIR_PATH,
-                                   f"models/tokenizers/{MODEL_NAME}_e.pickle"))
+
+TEXT_TOKENIZER_PATH = os.path.join(DIR_PATH,
+                                   f"models/tokenizers/{MODEL_NAME}_t.pickle")
+EQUATION_TOKENIZER_PATH = os.path.join(DIR_PATH,
+                                       f"models/tokenizers/{MODEL_NAME}_e.pickle")
+
+ARE_TOKENIZERS_PRESENT = os.path.exists(TEXT_TOKENIZER_PATH) \
+    or os.path.exists(EQUATION_TOKENIZER_PATH)
 
 # Set the seed for random
 random.seed(SEED)
 
 
-def main():
-    print("Starting the Math Word Problem (MWP) Transformer training.")
+def filter_max_length(x, y, max_length=MAX_LENGTH):
+    return tf.logical_and(tf.size(x) <= max_length,
+                          tf.size(y) <= max_length)
+
+
+if __name__ == "__main__":
+    print("Starting the MWP Transformer training.")
+
+    train_text = []
+    train_equations = []
+
+    if PRETRAIN:
+        print("Getting pretraining data...\n")
+        train_english = []
+        train_english_blanks = []
+
+        # Pretrain on unlabelled english text for more in-depth understanding of english
+        data = tfds.load("imdb_reviews",
+                         data_dir=os.path.join(DIR_PATH,
+                                               'data/tensorflow-datasets/'))
+
+        english_data = tfds.as_numpy(data["train"])
+
+        english_data = list(english_data)
+        random.shuffle(english_data)
+
+        # Produce ~314041 examples of english
+        for sentence in english_data:
+            # Clean up each document in the data
+            text = sentence["text"].decode("utf-8")
+            text = re.sub(r"(<br \/>)+", "\n", text)
+            text = re.sub(r",", " , ", text)
+            text = re.sub(r"\"", " \" ", text)
+            text = re.sub(r"'", " '", text)
+            text = re.sub(r"\. ", " .\n", text)
+            text = re.sub(r"\? ", " ?\n", text)
+            text = re.sub(r"! ", " ! ", text)
+            text = re.sub(r"- ", " - ", text)
+            text = re.sub(r"\+ ", " + ", text)
+            text = re.sub(r"\* ", " * ", text)
+            text = re.sub(r"\/ ", " / ", text)
+
+            for se in text.split('\n'):
+                # Unlabelled english text
+                train_english.append(se.lower())
+                train_english_blanks.append("")
+
+        # Convert arrays to TensorFlow constants
+        train_eng_const = tf.constant(train_english)
+        train_blk_const = tf.constant(train_english_blanks)
+
+        # Turn the constants into TensorFlow Datasets
+        english_dataset = tf.data.Dataset.from_tensor_slices((train_eng_const,
+                                                              train_blk_const))
+
+        print("...done.\n")
     print(f"\nTokenizing data from {DATASET}...\n")
 
     examples = load_data_from_binary(DATA_PATH)
 
-    print(f"Shuffling data with seed: {SEED}")
+    print(f"Shuffling data with seed: {SEED}\n")
     random.shuffle(examples)
-
-    train_text = []
-    train_equations = []
 
     # Get training examples
     for example in examples:
@@ -130,7 +194,8 @@ def main():
                 train_text.append(txt)
             else:
                 txt, exp = get_as_tuple(example)
-                masked_txt, masked_exp = NumberTag(txt, exp).get_masked()
+
+                masked_txt, masked_exp, _ = NumberTag(txt, exp).get_masked()
 
                 if not EQUALS_SIGN:
                     train_equations.append(expressionize(masked_exp))
@@ -142,23 +207,32 @@ def main():
             # Some of the filtered questions are empty... Working on a fix
             pass
 
-        # Convert arrays to TensorFlow constants
-        train_text_const = tf.constant(train_text)
-        train_eq_const = tf.constant(train_equations)
+    if PRETRAIN:
+        print(
+            f"Set to train with {len(train_english)} examples of unlabelled english.\n")
+    else:
+        print(f"Set to train with {len(train_text)} examples.\n")
 
-        # Turn the constants into TensorFlow Datasets
-        t_dataset = tf.data.Dataset.from_tensor_slices((train_text_const,
-                                                        train_eq_const))
+    print("Building vocabulary...\n")
 
-    print("Building vocabulary...")
+    # Convert arrays to TensorFlow constants
+    train_text_const = tf.constant(train_text)
+    train_eq_const = tf.constant(train_equations)
+
+    # Turn the constants into TensorFlow Datasets
+    training_dataset = tf.data.Dataset.from_tensor_slices((train_text_const,
+                                                           train_eq_const))
+
+    if PRETRAIN:
+        training_dataset = training_dataset.concatenate(english_dataset)
 
     if not ARE_TOKENIZERS_PRESENT:
         # Create data tokenizers
-        tokenizer_txt = ENCODE_METHOD.build_from_corpus((txt.numpy() for txt, eq in t_dataset),
-                                                        target_vocab_size=2**15)
+        tokenizer_txt = ENCODE_METHOD.build_from_corpus((txt.numpy() for txt, _ in training_dataset),
+                                                        target_vocab_size=2**13)
 
-        tokenizer_eq = ENCODE_METHOD.build_from_corpus((eq.numpy() for txt, eq in t_dataset),
-                                                       target_vocab_size=2**15)
+        tokenizer_eq = ENCODE_METHOD.build_from_corpus((eq.numpy() for _, eq in training_dataset),
+                                                       target_vocab_size=2**13)
 
         to_binary(os.path.join(DIR_PATH, f"models/tokenizers/{MODEL_NAME}_t.pickle"),
                   tokenizer_txt)
@@ -170,7 +244,9 @@ def main():
         tokenizer_eq = load_data_from_binary(
             f"models/tokenizers/{MODEL_NAME}_e.pickle")
 
-        print("Loaded tokenizers from file.")
+        print("\nLoaded tokenizers from file.")
+
+    print("Encoding inputs...")
 
     def encode(lang1, lang2):
         lang1 = [tokenizer_txt.vocab_size] + tokenizer_txt.encode(
@@ -181,25 +257,24 @@ def main():
 
         return lang1, lang2
 
-    def filter_max_length(x, y, max_length=MAX_LENGTH):
-        return tf.logical_and(tf.size(x) <= max_length,
-                              tf.size(y) <= max_length)
-
     def tf_encode(txt, eq):
         return tf.py_function(encode, [txt, eq], [tf.int64, tf.int64])
 
-    print("Encoding inputs...")
+    if PRETRAIN:
+        # Use only the unlabelled english data
+        training_dataset = english_dataset.map(tf_encode)
+    else:
+        training_dataset = training_dataset.map(tf_encode)
 
-    train_dataset = t_dataset.map(tf_encode)
-    train_dataset = train_dataset.filter(filter_max_length)
+    training_dataset = training_dataset.filter(filter_max_length)
 
     # Cache the dataset to memory to get a speedup while reading from it.
-    train_dataset = train_dataset.cache()
+    training_dataset = training_dataset.cache()
 
-    train_dataset = train_dataset.padded_batch(BATCH_SIZE,
-                                               padded_shapes=([-1], [-1]))
+    training_dataset = training_dataset.padded_batch(BATCH_SIZE,
+                                                     padded_shapes=([-1], [-1]))
 
-    train_dataset = train_dataset.prefetch(tf.data.experimental.AUTOTUNE)
+    training_dataset = training_dataset.prefetch(tf.data.experimental.AUTOTUNE)
 
     input_vocab_size = tokenizer_txt.vocab_size + 2
     target_vocab_size = tokenizer_eq.vocab_size + 2
@@ -208,8 +283,12 @@ def main():
     print("\nDefining the Transformer model...")
 
     # Using the Adam optimizer
-    # Can also use CustomSchedule(D_MODEL) for lr
-    optimizer = tf.keras.optimizers.Adam(LEARNING_RATE,
+    learning_rate = settings["lr"]
+
+    if learning_rate == "scheduled":
+        learning_rate = CustomSchedule(D_MODEL)
+
+    optimizer = tf.keras.optimizers.Adam(learning_rate,
                                          beta_1=BETA_1,
                                          beta_2=BETA_2,
                                          epsilon=EPSILON)
@@ -227,7 +306,7 @@ def main():
                               DROPOUT)
 
     print("...done.")
-    print("\nTraining...")
+    print("\nTraining...\n")
 
     # Model saving
     ckpt = tf.train.Checkpoint(transformer=transformer,
@@ -245,27 +324,30 @@ def main():
 
     # If a checkpoint exists, restore the latest checkpoint.
     if ckpt_manager.latest_checkpoint and CONTINUE_FROM_CKPT:
-        ckpt.restore(ckpt_manager.latest_checkpoint)
-        print(f"Restored from {CHECKPOINT_PATH} checkpoint")
+        ckpt.restore(ckpt_manager.latest_checkpoint).expect_partial()
+        print(f"Restored from {CHECKPOINT_PATH} checkpoint\n")
 
-     # Log all the settings used in the session
-    log(MODEL_NAME, MODEL_NAME)
-    log(MODEL_PATH, MODEL_NAME)
+    # Set the logger to report to the correct file
+    logger = Logger(MODEL_NAME)
+    # Log all the settings used in the session
+    logger.log(MODEL_NAME)
+    logger.log(MODEL_PATH)
     if CONTINUE_FROM_CKPT:
-        log(f"Continued from {CHECKPOINT_PATH}", MODEL_NAME)
-    log(DATASET, MODEL_NAME)
-    log(f"Random Shuffle Seed: {SEED}", MODEL_NAME)
-    log(f"\nEpochs: {EPOCHS}", MODEL_NAME)
-    log(f"Batch Size: {BATCH_SIZE}", MODEL_NAME)
-    log(f"Max Length: {MAX_LENGTH}", MODEL_NAME)
-    log(f"Equals Sign: {EQUALS_SIGN}", MODEL_NAME)
-    log(f"Layers: {NUM_LAYERS}", MODEL_NAME)
-    log(f"Heads: {NUM_HEADS}", MODEL_NAME)
-    log(f"Model Depth: {D_MODEL}", MODEL_NAME)
-    log(f"Feed Forward Depth: {DFF}", MODEL_NAME)
-    log(f"Dropout: {DROPOUT}\n", MODEL_NAME)
-    log(f"Learning Rate: {LEARNING_RATE}\n", MODEL_NAME)
-    log(f"Adam Params: b1 {BETA_1} b2 {BETA_2} e {EPSILON}\n", MODEL_NAME)
+        logger.log(f"Continued from {CHECKPOINT_PATH}")
+    logger.log(DATASET)
+    logger.log(f"Random Shuffle Seed: {SEED}")
+    logger.log(f"\nPretraining: {PRETRAIN}")
+    logger.log(f"Epochs: {EPOCHS}")
+    logger.log(f"Batch Size: {BATCH_SIZE}")
+    logger.log(f"Max Length: {MAX_LENGTH}")
+    logger.log(f"Equals Sign: {EQUALS_SIGN}")
+    logger.log(f"Layers: {NUM_LAYERS}")
+    logger.log(f"Heads: {NUM_HEADS}")
+    logger.log(f"Model Depth: {D_MODEL}")
+    logger.log(f"Feed Forward Depth: {DFF}")
+    logger.log(f"Dropout: {DROPOUT}\n")
+    logger.log(f"Learning Rate: {learning_rate}\n")
+    logger.log(f"Adam Params: b1 {BETA_1} b2 {BETA_2} e {EPSILON}\n")
 
     @tf.function
     def train_step(inp, tar):
@@ -302,7 +384,7 @@ def main():
         train_acc.reset_states()
 
         # inp -> MWP, tar -> Equation
-        for (batch, (inp, tar)) in enumerate(train_dataset):
+        for (batch, (inp, tar)) in enumerate(training_dataset):
             train_step(inp, tar)
 
             if batch % 10 == 0:
@@ -313,7 +395,21 @@ def main():
                     train_loss.result(),
                     train_acc.result()))
 
-        if epoch == (EPOCHS - 1):
+        print_epoch("Epoch {}/{} Batch {} Loss {:.4f} Accuracy {:.4f}".format(
+            epoch + 1,
+            EPOCHS,
+            batch,
+            train_loss.result(),
+            train_acc.result()), clear=True)
+        # Save a log of the epoch results
+        logger.log(
+            f"Epoch {epoch + 1}: loss {train_loss.result()} acc {train_acc.result()}")
+
+        # Calculate the time the epoch took to complete
+        # The first epoch seems to take significantly longer than the others
+        print(f"Epoch took {int(time.time() - start)}s\n")
+
+        if epoch == (EPOCHS - 1) or (train_loss.result() < LOSS_THRESHHOLD and not PRETRAIN):
             # Save a checkpoint of model weights
             ckpt_save_path = ckpt_manager.save()
             print(f'Saved {MODEL_NAME} to {ckpt_save_path}\n')
@@ -324,18 +420,7 @@ def main():
             with open(os.path.join(DIR_PATH, sys.argv[1]), mode="w") as fh:
                 json.dump(settings, fh)
 
-        print_epoch("Epoch {}/{} Batch {} Loss {:.4f} Accuracy {:.4f}".format(
-            epoch + 1,
-            EPOCHS,
-            batch,
-            train_loss.result(),
-            train_acc.result()), clear=True)
-        # Save a log of the epoch results
-        log(f"Epoch {epoch + 1}: loss {train_loss.result()} acc {train_acc.result()}", MODEL_NAME)
-
-        # Calculate the time the epoch took to complete
-        # The first epoch seems to take significantly longer than the others
-        print(f"Epoch took {int(time.time() - start)}s\n")
+            break
 
     print("...done.")
 
@@ -380,44 +465,89 @@ def main():
 
         return tf.squeeze(output, axis=0), attention_weights
 
-    def translate(sentence, translation):
+    def translate(sentence):
         # Translate from MWP to equation
         result, attention_weights = evaluate(sentence)
 
         predicted_equation = tokenizer_eq.decode([i for i in result
                                                   if i < tokenizer_eq.vocab_size])
-        # Print and log the translations of the test data
-        plog(f"Input: {sentence}\nHypothesis: {predicted_equation}", MODEL_NAME)
-        plog(f"Real Translation: {translation}", MODEL_NAME)
 
-        return predicted_equation, translation
+        return predicted_equation
 
     if isinstance(TEST_SET, str):
         print(f'\nTesting translations...')
 
         if TEST_SET == "infix":
             sets = ["test_ai_infix.pickle",
-                    "test_cc_infix.pickle", "test_il_infix.pickle"]
+                    "test_cc_infix.pickle",
+                    "test_il_infix.pickle",
+                    "test_mawps_infix.pickle"]
         elif TEST_SET == "postfix":
             sets = ["test_ai_postfix.pickle",
-                    "test_cc_postfix.pickle", "test_il_postfix.pickle"]
-        elif TEST_SET == "postfix":
+                    "test_cc_postfix.pickle",
+                    "test_il_postfix.pickle",
+                    "test_mawps_postfix.pickle"]
+        elif TEST_SET == "prefix":
             sets = ["test_ai_prefix.pickle",
-                    "test_cc_prefix.pickle", "test_il_prefix.pickle"]
+                    "test_cc_prefix.pickle",
+                    "test_il_prefix.pickle",
+                    "test_mawps_prefix.pickle"]
+        else:
+            sets = [f"test_{TEST_SET}.pickle"]
 
         for s in sets:
-            log(s, MODEL_NAME)
+            logger.log(f"\n{s}")
 
-            test_set = load_data_from_binary(
-                os.path.join(DIR_PATH, "data/" + s))
+            test_set = load_data_from_binary(os.path.join(DIR_PATH,
+                                                          "data/" + s))
+
+            bleu = []
             # Test the model's translations on withheld data
             for i, data in enumerate(test_set):
                 data_dict = dict(data)
-                predicted, actual = translate(data_dict["question"],
-                                              expressionize(data_dict["equation"]))
+
+                q, e = data_dict["question"], data_dict["equation"]
+
+                tagger = NumberTag(q, e)
+
+                clean_q, clean_e = tagger.get_originals()
+
+                masked_input, masked_equation, mask_map = tagger.get_masked()
+
+                predicted = translate(masked_input)
+
+                unmasked_prediction = tagger.apply_map(predicted, mask_map)
+
+                logger.plog(f"Input: {clean_q}")
+                logger.plog(f"Hypothesis: {unmasked_prediction}")
+                if EQUALS_SIGN:
+                    logger.plog(f"Actual:    {clean_e}")
+
+                    bleu.append((unmasked_prediction, clean_e))
+                else:
+                    logger.plog(f"Actual:    {expressionize(clean_e)}")
+
+                    bleu.append((unmasked_prediction, expressionize(clean_e)))
+
+            n_attempt, perfect_percentage, precision, average_bleu = Scorer(
+                bleu).get()
+
+            logger.plog(
+                f"\nOut of {n_attempt} predictions, {perfect_percentage}% were correct with {average_bleu} Bleu-2 and {precision}% average precision.\n")
+
         print("...done.")
+
+    while True and EPOCHS == 0:
+        # Testing live really doesn't work all that great.
+        # It's fun to see the system in action though.
+        inp = input("Enter a MWP > ")
+
+        tagger = NumberTag(inp, "")
+        masked_input, _, mask_map = tagger.get_masked()
+
+        predicted = translate(masked_input)
+        unmasked_prediction = tagger.apply_map(predicted, mask_map)
+
+        print(f"Possible Equation: {unmasked_prediction}")
+
     print("Exiting.")
-
-
-if __name__ == "__main__":
-    main()

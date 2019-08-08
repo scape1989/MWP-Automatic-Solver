@@ -1,5 +1,5 @@
 #!/bin/bash
 
 for filename in *.json; do
-    python translator.py $filename
+    python translator.py $filename 0.00001
 done

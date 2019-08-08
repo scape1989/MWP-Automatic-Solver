@@ -1,10 +1,12 @@
 from __future__ import absolute_import
 
-import pickle
 import os
 import sys
+import pickle
 
-DIR_PATH = DIR_PATH = os.path.abspath(os.path.dirname(__file__))
+DIR_PATH = os.path.abspath(os.path.dirname(__file__))
+
+# Simple command line tool to read the pickle files
 
 
 def read_data_from_file(path):
@@ -19,5 +21,5 @@ def read_data_from_file(path):
 
 
 if __name__ == "__main__":
-    print(read_data_from_file(os.path.join(
-        DIR_PATH, f"../{sys.argv[1]}")))
+    print(read_data_from_file(os.path.join(DIR_PATH,
+                                           f"../{sys.argv[1]}")))

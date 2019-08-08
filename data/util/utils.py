@@ -1,7 +1,8 @@
 from __future__ import absolute_import
-import pickle
+
 import os
 import re
+import pickle
 
 DIR_PATH = os.path.abspath(os.path.dirname(__file__))
 
@@ -18,18 +19,6 @@ def to_binary(absolute_path, what):
     # Save to a binary
     with open(absolute_path, 'wb') as fh:
         pickle.dump(what, fh)
-
-
-def log(what, model):
-    # Append to the model's log
-    with open(os.path.join(DIR_PATH, f"../../models/trained/{model}.txt"), 'a+') as fh:
-        fh.write(what + '\n')
-
-
-def plog(what, model):
-    # Print then log
-    print(what)
-    log(what, model)
 
 
 def get_as_tuple(example):

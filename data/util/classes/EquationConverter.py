@@ -1,9 +1,8 @@
 from __future__ import absolute_import
 
 import re
-import sympy
-from .ExpressionTree import ExpressionTree
-from .Stack import Stack
+from data.util.classes.ExpressionTree import ExpressionTree
+from data.util.classes.Stack import Stack
 
 OPERATORS = set(['+', '-', '*', '/', '(', ')', '^'])
 PRIORITY = {'+': 2, '-': 2, '*': 3, '/': 3, '^': 4}
@@ -35,14 +34,6 @@ class EquationConverter():
         infix_expression = " ".join(inorder_list)
 
         return f"{self.equals_what} = {infix_expression}"
-
-    def solved(self, equation):
-        sympy_eq = sympy.sympify("Eq(" + equation.replace("=", ",") + ")")
-
-        solved_equation = [sympy.solve(sympy_eq, sym, dict=True)
-                           for sym in sympy_eq.free_symbols]
-
-        return solved_equation
 
     def eqset(self, equation="DEFAULT"):
         self.original_equation = equation

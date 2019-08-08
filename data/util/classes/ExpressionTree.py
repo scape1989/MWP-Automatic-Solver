@@ -1,8 +1,8 @@
 from __future__ import absolute_import
 
 import re
-from .Node import Node
-from .Stack import Stack
+from data.util.classes.Node import Node
+from data.util.classes.Stack import Stack
 
 # The Binary Tree Class
 # WARNING: Supports only numbers and operators

@@ -1,1 +1,0 @@
-for /r %%i in (*.json) do python translator.py %%i

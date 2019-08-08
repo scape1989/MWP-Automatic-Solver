@@ -1,12 +1,22 @@
-An automatic solver for math word problems using the 2017 Transformer model. Research conducted at the University of Colorado Colorado Springs in Summer 2019.
+![University of Colorado Colorado Springs](publication/UCCS.svg?raw=true "University of Colorado Colorado Springs")
 
-To start, you'll have to generate the data binaries by running the following.
+# MWP Automatic Solver
 
-```
-chmod a+x make-data && ./make-data
-```
+---
 
-Use the build shell script to build a container and then run it with your current user. The current directory is a mounted volume so the checkpoints and training logs are saved to the host machine. Then use the run script to start the container back up if you exit after building.
+This repo is the home to an automatic solver for math word problems using the 2017 Transformer model. This research was conducted at the University of Colorado Colorado Springs by Kaden Griffith and Jugal Kalita over the Summer in 2019. This research was a part of an undergratuate program through the National Science Foundation. This Transformer translates a word problem into a useable expression. We did not provide code to solve the output, but you can use our _EquationConverter_ class to solve the output using the sympy package.
+
+## Quickstart Guide
+
+---
+
+This quickstart is aimed to help you create your very own question to equation translator! Our configuration shown here is the model which perfomed the best among our tests. The translations are very basic, so don't expect this to finish your calculus homework.
+
+#### Step 1
+
+---
+
+For consistency, a ready-to-use Docker image is contained in this repo. To download all necessary packages and a version of TensorFlow that uses GPU configurations, follow this step. If you do not have Docker installed, you're going to want to install that before proceeding here.
 
 Build the Docker image by:
 
@@ -14,59 +24,99 @@ Build the Docker image by:
 chmod a+x docker-build && ./docker-build
 ```
 
-You can re-run the docker image with GPUs using:
+This command will build the image, and start up a bash environment that we can train and test from. The following command is used after you exit the container and wish to start it again.
 
 ```
 ./run
 ```
 
-The approach now is to use a vanilla Transformer model and see how accurate we can get it. It's the example found [here](https://www.tensorflow.org/beta/tutorials/text/transformer).
+The script above is set to mount the working directory and use only GPU0 on your system. Please alter the script to utilize more GPUs if you want to speed up the training process (i.e. _NVIDIA_VISIBLE_DEVICES=0,1_ to use 2 GPUs).
 
-Data collected thus far is from [AI2 Arithmetic Questions](https://allenai.org/data/data-all.html), [Common Core](https://cogcomp.org/page/resource_view/98), and [Illinois](https://cogcomp.org/page/resource_view/98). Data has been compiled to respect only single variable algebra questions. Hopefully multi-var and more calculus-based work will follow. Further work to transform the data to generalize more consistently is being researched currently.
+#### Step 2
 
-More datasets will be added to create a more diverse set compared to the data that has recently proven to be less-than-promising. So far, this repo has collected ~4000 math word problems. That doesn't count the generated problems.
+---
 
-All questions in the testing and training data are similar to the following:
+In order to increase portability, data compilers and generators exist that need to be used before training your model! Run the following command to both generate 50000 problems using our problem generator and compile the training and test sets we used in our work. We did not end up using the 50000 generated problems in our publication, but they're fun to test with.
 
 ```
-There are 37 short bushes and 30 tall trees currently in the park . Park workers will plant 20 short bushes today . How many short bushes will the park have when the workers are finished ?
+chmod a+x make-data && ./make-data
+```
+
+Data collected is from [AI2 Arithmetic Questions](https://allenai.org/data/data-all.html), [Common Core](https://cogcomp.org/page/resource_view/98), [Illinois](https://cogcomp.org/page/resource_view/98), and [MaWPS](http://lang.ee.washington.edu/MAWPS/). For more details on these sets, please refer to their authors.
+
+All MWPs in the testing and training data are similar to the following:
+
+```
+There are 37 short bushes and 30 tall trees currently in the park. Park workers will plant 20 short bushes today. How many short bushes will the park have when the workers are finished?
 57
 X = 37 + 20
 ```
 
-My trainable model is found in the translator.py file.
+#### Step 3
 
-First create a config JSON file like this:
+---
+
+Our approach has tested various vanilla Transformer models. Our most successful model is very fast and only requires a single Transformer layer.
+
+The trainable model is found in the translator.py file.
+
+To use this model create a config JSON file like this:
 
 ```
 {
-  "dataset": "train_infix.pickle",
-  "test": false,
-  "seed": 365420,
+  "dataset": "train_all_prefix.pickle",
+  "test": "prefix",
+  "test_using_prompt": false,
+  "pretrain": false,
+  "seed": 6271996,
   "model": false,
-  "dff": 2048,
-  "layers": 6,
-  "d_model": 512,
-  "heads": 16,
-  "lr": 0.0001,
+  "layers": 1,
+  "heads": 8,
+  "d_model": 256,
+  "dff": 512,
+  "lr": "scheduled",
   "dropout": 0.1,
-  "epochs": 1,
-  "batch": 64,
-  "beta_1": 0.98,
+  "epochs": 300,
+  "batch": 128,
+  "beta_1": 0.95,
   "beta_2": 0.99
 }
 
-// output to myconfig.json
+// output to config.json
 ```
 
-Then you can run the trial script to iterate over all of your configuration files.
+#### Step 4
 
-To run a sinlge trial you can use:
+---
+
+From this point you can run the following command in the container.
 
 ```
-python translator.py myconfig.json
+// 0.0001 <- Training will stop if loss is below this value.
+// Set it low to complete your trial fully.
+// Default (no argument) is 0.001
+
+python config.json 0.0001
 ```
 
-TODO:
-[] Unsupervised training on language in general
-[] Train on generated equations with words instead of numbers
+Alternatively, you can run the 'trial' script, which will iterate over all of the config files found in the root directory and will not stop early.
+
+#### Step 5
+
+---
+
+After training, your model will be saved and your configuration file will be updated to refer to this model. You can train from the checkpoint generated by repeating step 4.
+
+#### Tips
+
+---
+
+- You can test your model with your own math questions by enabling 'test_using_prompt' in your configuration.
+- Once trained, setting 'epochs' to 0 will skip training if you wish to retest your model. This mode will also enable the command line input. The translator works well when fed data from the training sets, but highly unique user input will most likley not result in the best output equations.
+- To pretrain your model on IMDb reviews, enable the 'pretrain' setting before training on MWP data.
+
+---
+
+We hope that your intrest in math word problems has increased, and encourage any suggestions for future work or bug fixes.
+
+Happy solving! ~(˘▾˘~)

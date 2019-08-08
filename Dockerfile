@@ -1,10 +1,10 @@
 FROM tensorflow/tensorflow:2.0.0b1-gpu-py3
 
-WORKDIR /home/mwp
-ADD . /home/mwp
+WORKDIR /home/translator
 
-RUN pip install keras
+RUN pip install --upgrade pip
+RUN pip install --upgrade virtualenv
+RUN virtualenv /home/translator
+RUN . /home/translator/bin/activate
 RUN pip install tensorflow-datasets
-RUN pip install numpy
 RUN pip install nltk
-RUN pip install sympy
