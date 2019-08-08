@@ -1,10 +1,10 @@
-![University of Colorado Colorado Springs](publication/UCCS.svg?raw=true "University of Colorado Colorado Springs")
+![University of Colorado Colorado Springs](https://github.com/kadengriffith/MWP-Automatic-Solver/blob/master/publication/UCCS.svg)
 
 # MWP Automatic Solver
 
 ---
 
-This repo is the home to an automatic solver for math word problems using the 2017 Transformer model. This research was conducted at the University of Colorado Colorado Springs by Kaden Griffith and Jugal Kalita over the Summer in 2019. This research was a part of an undergratuate program through the National Science Foundation. This Transformer translates a word problem into a useable expression. We did not provide code to solve the output, but you can use our _EquationConverter_ class to solve the output using the sympy package.
+This repo is the home to an automatic solver for math word problems using the 2017 Transformer model. This research was conducted at the University of Colorado Colorado Springs by Kaden Griffith and Jugal Kalita over the Summer in 2019. This research was a part of an undergratuate program through the National Science Foundation. This Transformer arrangement translates a word problem into a useable expression. We did not provide comprehensive code to solve the output, but you can use our _EquationConverter_ class to solve infix expressions via the sympy package.
 
 ## Quickstart Guide
 
@@ -66,7 +66,6 @@ To use this model create a config JSON file like this:
 {
   "dataset": "train_all_prefix.pickle",
   "test": "prefix",
-  "test_using_prompt": false,
   "pretrain": false,
   "seed": 6271996,
   "model": false,
@@ -99,7 +98,7 @@ From this point you can run the following command in the container.
 python config.json 0.0001
 ```
 
-Alternatively, you can run the 'trial' script, which will iterate over all of the config files found in the root directory and will not stop early.
+Alternatively, you can run the _trial_ script, which will iterate over all of the config files found in the root directory and will not stop early.
 
 #### Step 5
 
@@ -111,12 +110,11 @@ After training, your model will be saved and your configuration file will be upd
 
 ---
 
-- You can test your model with your own math questions by enabling 'test_using_prompt' in your configuration.
-- Once trained, setting 'epochs' to 0 will skip training if you wish to retest your model. This mode will also enable the command line input. The translator works well when fed data from the training sets, but highly unique user input will most likley not result in the best output equations.
+- Once trained, setting 'epochs' to 0 will skip training if you wish to retest your model. This mode will also enable the command line input testing. The translator works well when fed data from the training sets, but highly unique user input will most likley not result in the best output equations.
 - To pretrain your model on IMDb reviews, enable the 'pretrain' setting before training on MWP data.
 
 ---
 
 We hope that your intrest in math word problems has increased, and encourage any suggestions for future work or bug fixes.
 
-Happy solving! ~(˘▾˘~)
+Happy solving!
